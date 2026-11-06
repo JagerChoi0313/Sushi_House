@@ -1,0 +1,15 @@
+{
+  "name": "sushi-house-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "寿司朗点餐测评系统 - Node.js 零依赖轻量后端",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "init": "node --disable-warning=ExperimentalWarning src/init_db.js",
+    "seed": "node --disable-warning=ExperimentalWarning src/init_db.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
