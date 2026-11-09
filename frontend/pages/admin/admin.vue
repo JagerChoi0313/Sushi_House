@@ -6,6 +6,7 @@
         <view class="btn btn-sm btn-primary" @tap="openForm()">＋ 新增</view>
       </view>
       <view v-for="d in dishes" :key="d.id" class="admin-row">
+        <image v-if="d.image" :src="BASE_URL + d.image" mode="aspectFill" class="dish-thumb" />
         <view class="flex1">
           <text class="dish-name">{{ d.name }}</text>
           <text class="muted row-sub">¥{{ d.price }} · {{ d.calories != null ? d.calories + ' kcal' : '热量未录入' }} · {{ STATUS_LABEL[d.status] }}</text>
@@ -103,7 +104,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
-import { STATUS_LABEL } from '../../common/config.js'
+import { STATUS_LABEL, BASE_URL } from '../../common/config.js'
 
 const dishes = ref([])
 const categories = ref([])
@@ -272,6 +273,7 @@ onShow(() => load())
 <style scoped>
 .admin-row { display: flex; align-items: center; padding: 18rpx 0; border-bottom: 1rpx solid #f1f2f5; }
 .admin-row:last-child { border-bottom: none; }
+.dish-thumb { width: 96rpx; height: 96rpx; border-radius: 12rpx; margin-right: 20rpx; flex-shrink: 0; background: #f1f2f5; }
 .dish-name { font-size: 28rpx; font-weight: 600; }
 .row-sub { display: block; margin-top: 4rpx; }
 .link { color: #3b82f6; font-size: 26rpx; margin-left: 20rpx; }

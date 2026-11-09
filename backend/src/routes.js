@@ -4,6 +4,7 @@ import { ok, fail, round } from './util.js';
 import { makePassword, checkPassword, newToken, sha256 } from './auth.js';
 import { generatePlan } from './recommend.js';
 import { confirmMeal, recomputeProgress, revokeUnearnedBadges } from './evaluate.js';
+import { allergenLabel } from './allergens.js';
 import { UPLOAD_DIR } from './db.js';
 
 // ===================== 通用工具 =====================
@@ -121,7 +122,17 @@ function guessExt(filename, buf) {
   return '.png';
 }
 
-function mockRecognize(db, type) {
+/**
+ * 演示用示例数据 —— 不是识别结果。
+ *
+ * 这里没有接入任何 OCR：它只是从在售且有热量的菜里随机抽几条返回，
+ * 让「拍照记一餐」这条路能被走通、能被演示。返回的每一条都带 source: 'mock'，
+ * 前端据此显示「演示用示例数据」的提示，不把它当成识别结果。
+ *
+ * 将来接真实识别时，只需替换这一个函数：入参出参保持不变即可，
+ * 字段形状已经与 CORD 收据行项目 schema 对齐（见 docs/_识别契约_2026-11-09.md）。
+ */
+function demoRecognize(db, type) {
   const pool = db
     .prepare("SELECT id, name, price, calories FROM dishes WHERE status='on_sale' AND calories IS NOT NULL")
     .all();
@@ -134,7 +145,7 @@ function mockRecognize(db, type) {
     quantity: 1,
     unitPrice: d.price,
     unitCalories: d.calories,
-    source: type === 'bill' ? 'ocr' : 'photo',
+    source: 'mock',
   }));
 }
 
@@ -283,21 +294,71 @@ async function listDishes({ db, query, res }) {
     conds.push('d.id IN (SELECT dish_id FROM dish_tags WHERE tag_id = ?)');
     args.push(Number(query.tagId));
   }
+  // 排除过敏原：excludeAllergen=えび,かに （逗号分隔）
+  if (query.excludeAllergen) {
+    const list = String(query.excludeAllergen)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (list.length) {
+      // 用 LIKE 精确匹配逗号分隔串里的完整词
+      const cond = list
+        .map(() => `(',' || COALESCE(n.allergen_list,'') || ',') NOT LIKE ?`)
+        .join(' AND ');
+      conds.push(`(${cond})`);
+      for (const a of list) args.push(`%,${a},%`);
+    }
+  }
+  // 只要含某过敏原：includeAllergen=えび
+  if (query.includeAllergen) {
+    const list = String(query.includeAllergen)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (list.length) {
+      conds.push(
+        `(${list.map(() => `(',' || COALESCE(n.allergen_list,'') || ',') LIKE ?`).join(' OR ')})`
+      );
+      for (const a of list) args.push(`%,${a},%`);
+    }
+  }
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  // 2026-11-09 补（BUG-6）：原来一次返回全部 271 道（135 KB），前端只能自己 slice。
+  // 现在支持 limit/offset，但**不给 limit 时行为与以前完全一样**（返回全部），
+  // 所以老调用方不受影响；额外回一个 total 让前端能显示「共 N 道」。
+  const limit = Math.min(Math.max(Number(query.limit) || 0, 0), 5000);
+  const offset = Math.max(Number(query.offset) || 0, 0);
+  const total = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM dishes d
+         LEFT JOIN dish_categories c ON c.id = d.category_id
+         LEFT JOIN dish_nutrition n ON n.dish_id = d.id
+        ${where}`
+    )
+    .get(...args).n;
+  const paging = limit > 0 ? 'LIMIT ? OFFSET ?' : '';
+  const pageArgs = limit > 0 ? [limit, offset] : [];
   const dishes = db
     .prepare(
-      `SELECT d.*, c.name AS category_name
-         FROM dishes d LEFT JOIN dish_categories c ON c.id = d.category_id
+      `SELECT d.*, c.name AS category_name,
+              n.kcal_estimate, n.kcal_unit, n.shape, n.allergen_list, n.allergen_source
+         FROM dishes d
+         LEFT JOIN dish_categories c ON c.id = d.category_id
+         LEFT JOIN dish_nutrition n ON n.dish_id = d.id
         ${where}
-        ORDER BY (d.status = 'off_sale'), d.id`
+        ORDER BY (d.status = 'off_sale'), d.id
+        ${paging}`
     )
-    .all(...args);
+    .all(...args, ...pageArgs);
   attachTags(db, dishes);
-  return ok(res, { dishes });
+  for (const d of dishes) {
+    d.allergens = d.allergen_list ? d.allergen_list.split(',') : [];
+  }
+  return ok(res, { dishes, total, limit: limit || total, offset });
 }
 
-async function getDish({ db, params, res }) {
-  const dish = db
+async function getDish({ db, params, res }) {  const dish = db
     .prepare(
       'SELECT d.*, c.name AS category_name FROM dishes d LEFT JOIN dish_categories c ON c.id=d.category_id WHERE d.id=?'
     )
@@ -305,6 +366,47 @@ async function getDish({ db, params, res }) {
   if (!dish) return fail(res, '菜品不存在', 404);
   attachTags(db, [dish]);
   return ok(res, { dish });
+}
+
+// ===================== 过敏原 / 食材 =====================
+
+async function listAllergens({ db, res }) {
+  const rows = db
+    .prepare(
+      `SELECT n.allergen_list FROM dish_nutrition n
+        WHERE n.allergen_list IS NOT NULL AND n.allergen_list != ''`
+    )
+    .all();
+  const counter = new Map();
+  for (const r of rows) {
+    for (const a of r.allergen_list.split(',')) {
+      if (a) counter.set(a, (counter.get(a) || 0) + 1);
+    }
+  }
+  const allergens = [...counter.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, label: allergenLabel(name), count }));
+  return ok(res, { allergens });
+}
+
+async function listIngredients({ db, query, res }) {
+  const conds = [];
+  const args = [];
+  if (query.dishId) {
+    conds.push('di.dish_id = ?');
+    args.push(Number(query.dishId));
+  }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const ingredients = db
+    .prepare(
+      `SELECT i.id, i.name, i.joy_name, i.kcal_100g, COUNT(di.id) AS dish_count
+         FROM ingredients i
+         LEFT JOIN dish_ingredients di ON di.ingredient_id = i.id
+         ${where}
+        GROUP BY i.id ORDER BY dish_count DESC, i.id`
+    )
+    .all(...args);
+  return ok(res, { ingredients });
 }
 
 // ===================== 餐前计划 =====================
@@ -484,7 +586,7 @@ async function ocrImage({ db, user, params, res }) {
   const id = Number(params[0]);
   const up = db.prepare('SELECT * FROM meal_uploads WHERE id=? AND user_id=?').get(id, user.id);
   if (!up) return fail(res, '上传记录不存在', 404);
-  const drafts = mockRecognize(db, up.type);
+  const drafts = demoRecognize(db, up.type);
   db.prepare("UPDATE meal_uploads SET ocr_status='done', ocr_result=? WHERE id=?").run(
     JSON.stringify(drafts),
     id
@@ -501,7 +603,7 @@ async function encyclopedia({ db, user, res }) {
               p.eat_count, p.portion_count, p.first_eaten_at
          FROM dishes d
          LEFT JOIN user_dish_progress p ON p.dish_id = d.id AND p.user_id = ?
-        WHERE d.status != 'off_sale'
+        WHERE d.status = 'on_sale'
         ORDER BY d.category_id, d.id`
     )
     .all(user.id);
@@ -709,6 +811,135 @@ async function adminDeleteBadgeRule({ db, params, res }) {
   return ok(res, {});
 }
 
+// ===================== 七地区世界菜单 =====================
+
+async function worldMeta({ db, res }) {
+  const rows = db
+    .prepare('SELECT region_code AS code, region AS name, COUNT(*) AS count FROM world_dishes GROUP BY region_code ORDER BY MIN(id)')
+    .all();
+  const cats = db
+    .prepare('SELECT region_code AS code, category, COUNT(*) AS count FROM world_dishes GROUP BY region_code, category')
+    .all();
+  const map = new Map();
+  for (const c of cats) {
+    if (!map.has(c.code)) map.set(c.code, []);
+    map.get(c.code).push({ name: c.category, count: c.count });
+  }
+  const regions = rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    count: r.count,
+    categories: (map.get(r.code) || []).sort((a, b) => b.count - a.count),
+  }));
+  const total = db.prepare('SELECT COUNT(*) AS n FROM world_dishes').get().n;
+  const withImg = db.prepare("SELECT COUNT(*) AS n FROM world_dishes WHERE image IS NOT NULL AND image <> ''").get().n;
+  return ok(res, { regions, total, withImage: withImg });
+}
+
+async function worldDishes({ db, query, res }) {
+  const conds = [];
+  const args = [];
+  if (query.region && query.region !== 'ALL') {
+    conds.push('region_code = ?');
+    args.push(String(query.region));
+  }
+  if (query.category) {
+    conds.push('category = ?');
+    args.push(String(query.category));
+  }
+  if (query.search) {
+    const s = '%' + String(query.search).trim() + '%';
+    conds.push('(name LIKE ? OR name_zh LIKE ? OR name_alt LIKE ? OR ingredients LIKE ?)');
+    args.push(s, s, s, s);
+  }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const limit = Math.min(Number(query.limit) || 2000, 5000);
+  const offset = Math.max(Number(query.offset) || 0, 0);
+  const rows = db
+    .prepare(
+      `SELECT id, region_code, region, idx, name, name_alt, name_zh, category,
+              price, currency, price_display, price_cny, ingredients, forms, flavors, image
+         FROM world_dishes ${where}
+        ORDER BY id LIMIT ? OFFSET ?`
+    )
+    .all(...args, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM world_dishes ${where}`).get(...args).n;
+  return ok(res, { dishes: rows, total, limit, offset });
+}
+
+/**
+ * 把逗号分隔的标签串归一化：去空白、转小写、丢掉空项、排序。
+ * 这样 `Salmon, avocado` 与 `avocado,salmon` 会被认成同一组食材。
+ */
+function normTagSet(s) {
+  return String(s ?? '')
+    .split(',')
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+}
+
+/** 详情页一次最多返回多少个跨地区对照（表最大的一组有 49 行） */
+const SIBLING_LIMIT = 20;
+
+async function worldDish({ db, params, res }) {
+  const row = db.prepare('SELECT * FROM world_dishes WHERE id = ?').get(Number(params[0]));
+  if (!row) return fail(res, '菜品不存在', 404);
+
+  // 跨地区对照：同一道菜 = 食材集合相同 + 形态相同。
+  //
+  // 2026-11-09 修（BUG-5）。原实现是
+  //   WHERE ingredients = ? AND forms = ? AND flavors = ? AND id <> ?
+  // 三个问题：
+  //   1) `NULL = NULL` 永不成立 —— 三项里有一个是 NULL 就永远查不到对照；
+  //   2) 空串会互撞 —— 现行口径下 1084 条「有对照」里有 346 条的 ingredients 是空串，
+  //      最大的一组 84 行（ingredients / forms / flavors 全空）其实是毫不相干的菜被粘在一起；
+  //   3) 多要求了 flavors 相等，可是 flavors 有 1028/1525 是空的，
+  //      而页面标题写的本来就是「同食材同形态 · 跨地区比价」—— 查询比 UI 的承诺更严。
+  //
+  // 改法：只在**食材集合非空**时才算对照（空值不算证据），食材与形态都按归一化后比较；
+  //      风味不再当硬条件，只标 flavorMatch 交给前端显示。
+  // 实测：真对照 738 → 874（+136），伪对照 346 → 0。
+  const ing = normTagSet(row.ingredients);
+  let siblings = [];
+  let siblingsTotal = 0;
+  if (ing) {
+    const forms = normTagSet(row.forms);
+    const flavors = normTagSet(row.flavors);
+    const candidates = db
+      .prepare(
+        `SELECT id, region_code, region, name, name_zh, price_cny, price_display, ingredients, forms, flavors
+           FROM world_dishes
+          WHERE id <> ? AND COALESCE(ingredients, '') <> ''`
+      )
+      .all(row.id);
+    const all = candidates.filter(
+      (c) => normTagSet(c.ingredients) === ing && normTagSet(c.forms) === forms
+    );
+    siblingsTotal = all.length;
+    all.sort((a, b) => {
+      const fa = normTagSet(a.flavors) === flavors ? 0 : 1;
+      const fb = normTagSet(b.flavors) === flavors ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      const pa = a.price_cny == null ? Infinity : a.price_cny;
+      const pb = b.price_cny == null ? Infinity : b.price_cny;
+      return pa - pb;
+    });
+    siblings = all.slice(0, SIBLING_LIMIT).map((c) => ({
+      id: c.id,
+      region_code: c.region_code,
+      region: c.region,
+      name: c.name,
+      name_zh: c.name_zh,
+      price_cny: c.price_cny,
+      price_display: c.price_display,
+      flavorMatch: normTagSet(c.flavors) === flavors,
+    }));
+  }
+  return ok(res, { dish: row, siblings, siblingsTotal });
+}
+
 // ===================== 路由表 =====================
 
 export const routes = [
@@ -728,6 +959,12 @@ export const routes = [
   { method: 'GET', pattern: /^\/api\/tags$/, handler: listTags },
   { method: 'GET', pattern: /^\/api\/dishes$/, handler: listDishes },
   { method: 'GET', pattern: /^\/api\/dishes\/(\d+)$/, handler: getDish },
+  { method: 'GET', pattern: /^\/api\/allergens$/, handler: listAllergens },
+  { method: 'GET', pattern: /^\/api\/ingredients$/, handler: listIngredients },
+  // 七地区世界菜单
+  { method: 'GET', pattern: /^\/api\/world\/meta$/, handler: worldMeta },
+  { method: 'GET', pattern: /^\/api\/world\/dishes$/, handler: worldDishes },
+  { method: 'GET', pattern: /^\/api\/world\/dishes\/(\d+)$/, handler: worldDish },
   // 餐前计划
   { method: 'POST', pattern: /^\/api\/plans\/generate$/, auth: 'user', handler: generatePlanHandler },
   { method: 'GET', pattern: /^\/api\/plans$/, auth: 'user', handler: listPlans },

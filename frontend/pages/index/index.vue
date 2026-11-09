@@ -37,6 +37,11 @@
         <text class="action-title">餐前推荐</text>
         <text class="muted">按预算/热量搭一桌</text>
       </view>
+      <view class="action" @tap="switchTab('/pages/world/world')">
+        <text class="action-icon">🌏</text>
+        <text class="action-title">世界菜单</text>
+        <text class="muted">七地区 1525 道比价</text>
+      </view>
       <view class="action" @tap="go('/pages/record/record')">
         <text class="action-icon">📷</text>
         <text class="action-title">餐后记录</text>

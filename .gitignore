@@ -16,3 +16,38 @@ Thumbs.db
 # SQLite 临时日志
 database/*.db-shm
 database/*.db-wal
+
+# ---- 采集数据：体积大，按需单独分发（见 _archives/*.zip）----
+catalog/
+catalog_jp/
+catalog_kr/
+catalog_sg/
+catalog_my/
+catalog_id/
+catalog_hk/
+_legacy/
+_archives/
+_shots/
+_scrape/
+menu_preview.html
+
+# ---- 本地开发副本：frontend/ 的 H5 运行拷贝，改 frontend 后手动同步 ----
+_h5run/
+
+# 说明（2026-11-09 改）：
+# _scrape/（采集脚本 161 个）与 catalog_all/（采集汇总表 17 个）原先入库，理由是「保持可复现」。
+# 但这两块共 178 个文件，与小程序本身的功能无关，会把 diff 从 46 个文件撑到 224 个 —— 审阅时读不过来。
+# 改成不入库。数据本身在 database/sushi_house.db 的 world_dishes 表里（跟代码一起提交），
+# 采集方法见 docs/PROMPT_寿司郎菜单爬取.md，字段含义见 docs/DESIGN.md。
+catalog_all/
+
+# ---- 2026-11-09 补齐：这几类体积大 / 私密 / 临时，不该进版本库 ----
+# （_scrape/ocrenv 是采集环境的 Python venv，含 numpy / onnxruntime，247 MB；
+#   _scrape/imgfill 是补图缓存 100 MB —— 两者都已被上面的 _scrape/ 覆盖）
+# 改库前的备份副本（每次改库都会新增一个，属于本地留证材料，不是源码）
+database/*.backup-*.db
+database/*.bak-*
+# 一次性调研缓存
+docs/_tmp_*.json
+# 微信开发者工具的个人私有配置（appid 与共享配置在 project.config.json 里）
+frontend/project.private.config.json
