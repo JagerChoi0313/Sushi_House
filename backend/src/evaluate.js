@@ -43,10 +43,13 @@ export function evaluateMeal(db, mealId) {
       .map((r) => [r.tag_id, r.type])
   );
 
+  // 口味命中按**菜品**计，不按标签出现次数计（BUG-10）。
+  // 一道菜挂了两个「喜欢」的标签，仍然只算它这一道合口味；
+  // 同时挂喜欢和讨厌时忌口优先（算不合口味）。
   let likeHit = 0;
-  let likeTotal = 0;
   let dislikeHit = 0;
-  let matchedItems = 0;
+  let prefTotal = 0; // 有偏好标签可判的菜品数（prefRatio 的分母）
+  let matchedItems = 0; // 匹配到菜单的菜品数
   for (const it of items) {
     if (it.dish_id == null) continue;
     matchedItems++;
@@ -54,17 +57,25 @@ export function evaluateMeal(db, mealId) {
       .prepare('SELECT tag_id FROM dish_tags WHERE dish_id=?')
       .all(it.dish_id)
       .map((r) => r.tag_id);
+    let hasLike = false;
+    let hasDislike = false;
     for (const t of tagIds) {
       const p = prefs.get(t);
-      if (p === 'like') {
-        likeHit++;
-        likeTotal++;
-      } else if (p === 'dislike') {
-        dislikeHit++;
-      }
+      if (p === 'like') hasLike = true;
+      else if (p === 'dislike') hasDislike = true;
     }
+    if (!hasLike && !hasDislike) continue;
+    prefTotal++;
+    if (hasDislike) dislikeHit++;
+    else likeHit++;
   }
-  const prefRatio = likeTotal > 0 ? likeHit / likeTotal : likeHit > 0 ? 1 : 0.5;
+  // 分母 = 「有偏好标签可判的菜品数」。两次修正都记在这里：
+  //   · 最初只在 p==='like' 时自增分母 → likeHit 恒等于分母、口味匹配率恒为 1
+  //     （占 20 分的项退化成常数）；
+  //   · 2026-11-09 上午改成按标签次数计 → 一道菜挂两个喜欢标签就算 2 次；
+  //     下午进一步改成按菜品计，跟「口味匹配率」这个名字对齐。
+  // 没有任何偏好标签命中时给 0.5，代表「无从判断」的中性值。
+  const prefRatio = prefTotal > 0 ? likeHit / prefTotal : 0.5;
 
   let budgetMet = null;
   let budgetDelta = 0;
@@ -84,7 +95,9 @@ export function evaluateMeal(db, mealId) {
   let score = 60;
   if (budgetMet === true) score += 15;
   else if (budgetMet === false) {
-    score += Math.max(-15, -15 * Math.min(1, -budgetDelta / (plan.budget || 1)));
+    // budgetDelta = 实付 - 预算，超支时为正。原实现写成 -budgetDelta，负负得正，
+    // 结果「超支反而加分」。这里改成超支越多扣分越多，上限 -15（与下面的热量分支同形）。
+    score += Math.max(-15, -15 * Math.min(1, budgetDelta / (plan.budget || 1)));
   }
   if (calorieMet === true) score += 15;
   else if (calorieMet === false) {
@@ -106,7 +119,9 @@ export function evaluateMeal(db, mealId) {
     prefRatio: round(prefRatio, 2),
     likeHit,
     dislikeHit,
+    prefTotal,
     matchedItems,
+    prefCountMode: 'per-dish', // 2026-11-09 起：按菜品计；更早写下的记录是按标签次数计
   };
 
   db.prepare(`INSERT INTO meal_evaluations

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { getDb, initSchema, UPLOAD_DIR, DB_PATH } from './db.js';
+import { getDb, initSchema, UPLOAD_DIR, DB_PATH, PROJECT_DIR } from './db.js';
 import { seedAll } from './seed.js';
 import { sha256 } from './auth.js';
 import { matchRoute } from './routes.js';
@@ -21,6 +21,17 @@ const MIME = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.txt': 'text/plain; charset=utf-8',
+};
+
+// 世界菜单图片目录
+const WORLD_IMG_DIRS = {
+  TW: path.join(PROJECT_DIR, 'catalog', 'images'),
+  JP: path.join(PROJECT_DIR, 'catalog_jp', 'images'),
+  KR: path.join(PROJECT_DIR, 'catalog_kr', 'images'),
+  HK: path.join(PROJECT_DIR, 'catalog_hk', 'images'),
+  SG: path.join(PROJECT_DIR, 'catalog_sg', 'images'),
+  MY: path.join(PROJECT_DIR, 'catalog_my', 'images'),
+  ID: path.join(PROJECT_DIR, 'catalog_id', 'images'),
 };
 
 function serveFile(res, filePath) {
@@ -76,6 +87,17 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   // 静态托管上传图片
+  // 世界菜单图片：/worldimg/<REGION>/<文件名>
+  if (pathname.startsWith('/worldimg/')) {
+    const parts = pathname.slice('/worldimg/'.length).split('/');
+    if (parts.length !== 2) return fail(res, 'bad path', 400);
+    const region = parts[0];
+    const dir = WORLD_IMG_DIRS[region];
+    if (!dir) return fail(res, '未知地区', 404);
+    const file = path.basename(decodeURIComponent(parts[1]));
+    return serveFile(res, path.join(dir, file));
+  }
+
   if (pathname.startsWith('/uploads/')) {
     const rel = decodeURIComponent(pathname.slice('/uploads/'.length));
     return serveFile(res, path.join(UPLOAD_DIR, path.basename(rel)));

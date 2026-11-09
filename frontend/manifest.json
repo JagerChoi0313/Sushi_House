@@ -12,7 +12,7 @@
   },
   "quickapp": {},
   "mp-weixin": {
-    "appid": "",
+    "appid": "wx20beb9792e3f0124",
     "setting": {
       "urlCheck": false,
       "es6": true,
@@ -21,9 +21,17 @@
     },
     "usingComponents": true
   },
-  "mp-alipay": { "usingComponents": true },
-  "mp-baidu": { "usingComponents": true },
-  "mp-toutiao": { "usingComponents": true },
-  "uniStatistics": { "enable": false },
+  "mp-alipay": {
+    "usingComponents": true
+  },
+  "mp-baidu": {
+    "usingComponents": true
+  },
+  "mp-toutiao": {
+    "usingComponents": true
+  },
+  "uniStatistics": {
+    "enable": false
+  },
   "vueVersion": "3"
 }

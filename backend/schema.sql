@@ -201,3 +201,66 @@ CREATE TABLE IF NOT EXISTS user_dish_progress (
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
   UNIQUE(user_id, dish_id)
 );
+
+-- ============================================================
+-- 以下 4 张表（17–20）原先只存在于数据库里，schema.sql 里没有，
+-- 所以 `node src/init_db.js` 从零建库后：
+--   /api/world/*            → no such table: world_dishes
+--   /api/ingredients        → no such table: ingredients
+--   /api/dishes 的 nutrition JOIN → no such table: dish_nutrition
+-- 2026-11-09 从现行库导出补上。列定义与现行库逐字一致，只为了
+-- 跟本文件其余部分一样幂等，加了 IF NOT EXISTS。
+-- ============================================================
+
+-- 17. 世界菜单（七地区比价）-----------------------------------
+CREATE TABLE IF NOT EXISTS world_dishes (
+  id          INTEGER PRIMARY KEY,
+  region_code TEXT    NOT NULL,                       -- TW / JP / KR / SG / MY / ID / HK
+  region      TEXT    NOT NULL,
+  idx         INTEGER NOT NULL,
+  name        TEXT    NOT NULL,
+  name_alt    TEXT,
+  name_zh     TEXT,
+  category    TEXT,
+  price       REAL,
+  currency    TEXT,
+  price_display TEXT,
+  price_cny   REAL,
+  ingredients TEXT,                                   -- 逗号分隔
+  forms       TEXT,                                   -- 逗号分隔
+  flavors     TEXT,                                   -- 逗号分隔
+  image       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_world_region ON world_dishes(region_code);
+CREATE INDEX IF NOT EXISTS idx_world_cat    ON world_dishes(region_code, category);
+CREATE INDEX IF NOT EXISTS idx_world_cny    ON world_dishes(price_cny);
+
+-- 18. 菜品营养与过敏原推断 ------------------------------------
+CREATE TABLE IF NOT EXISTS dish_nutrition (
+  dish_id         INTEGER PRIMARY KEY REFERENCES dishes(id) ON DELETE CASCADE,
+  kcal_estimate   REAL,                               -- 推断热量
+  kcal_unit       TEXT,                               -- 貫 / 份 / 杯 / 碗
+  shape           TEXT,                               -- 握壽司/軍艦/卷類/套餐...
+  kcal_basis      TEXT,                               -- 计算依据说明
+  allergen_list   TEXT,                               -- 逗号分隔的日本28品目
+  allergen_source TEXT,                               -- 推断来源说明
+  disclaimer      TEXT,
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- 19. 食材字典 ------------------------------------------------
+CREATE TABLE IF NOT EXISTS ingredients (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL UNIQUE,                 -- 中文食材名
+  joy_name   TEXT,                                    -- 日本28品目对应名（null=非过敏原）
+  kcal_100g  REAL,                                    -- 每100g热量（USDA）
+  created_at TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- 20. 菜品-食材关联 -------------------------------------------
+CREATE TABLE IF NOT EXISTS dish_ingredients (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  dish_id       INTEGER NOT NULL REFERENCES dishes(id) ON DELETE CASCADE,
+  ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+  UNIQUE(dish_id, ingredient_id)
+);

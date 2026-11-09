@@ -6,9 +6,12 @@
         <text :class="['pill', 'st-' + meal.status]">{{ statusLabel }}</text>
       </view>
       <view class="muted" style="margin-top: 10rpx">
-        实付 ¥{{ meal.actual_paid == null ? '—' : meal.actual_paid }} · 自评 {{ stars(meal.rating) }}
+        实付 ¥{{ fmtMoney(meal.actual_paid) }} · 自评 {{ stars(meal.rating) }}
       </view>
       <text v-if="meal.comment" style="display: block; margin-top: 14rpx">{{ meal.comment }}</text>
+      <view v-if="isVoid" class="void-note">
+        <text class="void-note-txt">这顿已作废，不计入图鉴进度与勋章统计，评级仅供参考。</text>
+      </view>
     </view>
 
     <view class="card">
@@ -16,21 +19,23 @@
       <view v-for="it in meal.items" :key="it.id" class="item-row">
         <text class="flex1">{{ it.dish_name }}</text>
         <text class="muted" style="margin: 0 16rpx">x{{ it.quantity }}</text>
-        <text>¥{{ it.unit_price }}</text>
+        <text>¥{{ fmtMoney(it.unit_price) }}</text>
         <text class="muted" style="margin-left: 16rpx">{{ it.unit_calories != null ? it.unit_calories + ' kcal' : '—' }}</text>
       </view>
     </view>
 
-    <view v-if="meal.evaluation" class="card">
-      <text class="section-title">系统评级</text>
+    <view v-if="meal.evaluation" class="card" :class="{ 'card-dim': isVoid }">
       <view class="row between">
-        <text class="tier" :style="{ color: tierColor(meal.evaluation.tier) }">{{ TIER_LABEL[meal.evaluation.tier] }}</text>
+        <text class="section-title">系统评级<text v-if="isVoid" class="muted">（已作废）</text></text>
+      </view>
+      <view class="row between">
+        <text class="tier" :style="{ color: isVoid ? '#8a8f99' : tierColor(evalTierKey) }">{{ evalTierLabel }}</text>
         <text class="muted">{{ meal.evaluation.score }} 分</text>
       </view>
       <view class="basis">
-        <text class="basis-line">预算：{{ meal.evaluation.basis.budgetMet == null ? '未设置计划' : meal.evaluation.basis.budgetMet ? '达成 ✓' : '超支 ' + meal.evaluation.basis.budgetDelta + ' 元' }}</text>
-        <text class="basis-line">热量：{{ meal.evaluation.basis.calorieMet == null ? '未设置上限' : meal.evaluation.basis.calorieMet ? '达成 ✓' : '超出' }}</text>
-        <text class="basis-line">口味匹配：{{ Math.round((meal.evaluation.basis.prefRatio || 0) * 100) }}%</text>
+        <text class="basis-line">预算：{{ budgetText }}</text>
+        <text class="basis-line">热量：{{ calorieText }}</text>
+        <text class="basis-line">口味匹配：{{ pct(basis.prefRatio) }}%</text>
       </view>
     </view>
 
@@ -53,7 +58,7 @@
       <view class="btn btn-ghost" style="flex: 1" @tap="voidIt">作废</view>
     </view>
   </view>
-  <view v-else class="empty">加载中…</view>
+  <view v-else class="empty">{{ loadError || '加载中…' }}</view>
 </template>
 
 <script setup>
@@ -61,24 +66,54 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
 import { BASE_URL, TIER_COLOR, TIER_LABEL } from '../../common/config.js'
-import { fmtDate, stars } from '../../common/util.js'
+import { errMsg, fmtDate, fmtMoney, pct, stars } from '../../common/util.js'
 
 const meal = ref(null)
 const mealId = ref(null)
+const loadError = ref('')
+
+const isVoid = computed(() => !!meal.value && meal.value.status === 'void')
+const basis = computed(() => (meal.value && meal.value.evaluation && meal.value.evaluation.basis) || {})
+
+// GET 详情返回的 evaluation 是库内原始行：tier 字段
+// POST confirm 返回的是转换后形状：tierKey / tierLabel
+// 这里统一兼容两种来源，避免字段名不一致导致档位空白
+const evalTierKey = computed(() => {
+  const e = meal.value && meal.value.evaluation
+  if (!e) return ''
+  return e.tierKey || e.tier || ''
+})
+const evalTierLabel = computed(() => {
+  const e = meal.value && meal.value.evaluation
+  if (!e) return ''
+  return e.tierLabel || TIER_LABEL[evalTierKey.value] || evalTierKey.value || '—'
+})
 
 const statusLabel = computed(() => {
   const s = meal.value && meal.value.status
   return s === 'draft' ? '草稿' : s === 'confirmed' ? '已确认' : s === 'void' ? '已作废' : s
 })
 
+const budgetText = computed(() => {
+  const b = basis.value
+  if (b.budgetMet == null) return '未设置计划'
+  if (b.budgetMet) return '达成 ✓'
+  return '超支 ' + fmtMoney(b.budgetDelta) + ' 元'
+})
+const calorieText = computed(() => {
+  const b = basis.value
+  if (b.calorieMet == null) return '未设置上限'
+  return b.calorieMet ? '达成 ✓' : '超出'
+})
+
 function tierColor(t) { return TIER_COLOR[t] || '#8a8f99' }
 
 async function load() {
   try {
-    const data = await api.get('/api/meals/' + mealId.value)
-    meal.value = data
+    meal.value = await api.get('/api/meals/' + mealId.value)
   } catch (e) {
-    uni.showToast({ title: e.message, icon: 'none' })
+    loadError.value = errMsg(e, '记录加载失败')
+    uni.showToast({ title: loadError.value, icon: 'none' })
   }
 }
 
@@ -91,21 +126,21 @@ async function confirmIt() {
     await load()
   } catch (e) {
     uni.hideLoading()
-    uni.showToast({ title: e.message, icon: 'none' })
+    uni.showToast({ title: errMsg(e), icon: 'none' })
   }
 }
 
 async function voidIt() {
-  const res = await new Promise((resolve) => {
+  const ok = await new Promise((resolve) => {
     uni.showModal({ title: '确认作废', content: '作废后不计入图鉴进度，确定吗？', success: (r) => resolve(r.confirm) })
   })
-  if (!res) return
+  if (!ok) return
   try {
     await api.post('/api/meals/' + mealId.value + '/void')
     uni.showToast({ title: '已作废', icon: 'none' })
     await load()
   } catch (e) {
-    uni.showToast({ title: e.message, icon: 'none' })
+    uni.showToast({ title: errMsg(e), icon: 'none' })
   }
 }
 
@@ -115,6 +150,10 @@ function preview() {
 }
 
 onLoad((options) => {
+  if (!options || !options.id) {
+    loadError.value = '缺少记录编号'
+    return
+  }
   mealId.value = options.id
   load()
 })
@@ -124,6 +163,9 @@ onLoad((options) => {
 .st-draft { background: #f1f2f5; color: #8a8f99; }
 .st-confirmed { background: #e6f7ea; color: #2f9e44; }
 .st-void { background: #fdeaea; color: #e64a45; }
+.void-note { margin-top: 16rpx; padding: 14rpx 16rpx; background: #fdeaea; border-radius: 12rpx; }
+.void-note-txt { font-size: 24rpx; color: #e64a45; line-height: 1.6; }
+.card-dim { opacity: 0.75; }
 .item-row { display: flex; align-items: center; padding: 18rpx 0; border-bottom: 1rpx solid #f1f2f5; }
 .item-row:last-child { border-bottom: none; }
 .tier { font-size: 56rpx; font-weight: 800; }

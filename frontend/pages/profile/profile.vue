@@ -9,9 +9,42 @@
         </view>
       </view>
       <view class="row stats">
-        <view class="stat"><text class="stat-num">{{ stats.mealCount }}</text><text class="muted">用餐</text></view>
-        <view class="stat"><text class="stat-num">{{ stats.unlocked }}</text><text class="muted">解锁</text></view>
-        <view class="stat"><text class="stat-num">{{ stats.badgeCount }}</text><text class="muted">勋章</text></view>
+        <view class="stat" @tap="goHistory">
+          <text class="stat-num">{{ stats.mealCount }}</text>
+          <text class="muted">用餐</text>
+        </view>
+        <view class="stat" @tap="goPlan">
+          <text class="stat-num">{{ stats.planCount }}</text>
+          <text class="muted">计划</text>
+        </view>
+        <view class="stat" @tap="goEncyclopedia">
+          <text class="stat-num">{{ stats.unlocked }}</text>
+          <text class="muted">解锁</text>
+        </view>
+        <view class="stat" @tap="goEncyclopedia">
+          <text class="stat-num">{{ stats.badgeCount }}</text>
+          <text class="muted">勋章</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <text class="section-title">我的</text>
+      <view class="cell" @tap="goHistory">
+        <text class="flex1">用餐历史</text>
+        <text class="muted">{{ stats.mealCount }} 条 ›</text>
+      </view>
+      <view class="cell" @tap="goPlan">
+        <text class="flex1">推荐计划</text>
+        <text class="muted">{{ stats.planCount }} 条 ›</text>
+      </view>
+      <view class="cell" @tap="goEncyclopedia">
+        <text class="flex1">图鉴与勋章</text>
+        <text class="muted">{{ stats.unlocked }} / {{ stats.badgeCount }} ›</text>
+      </view>
+      <view class="cell" @tap="goWorld">
+        <text class="flex1">七地区世界菜单</text>
+        <text class="muted">1525 道 ›</text>
       </view>
     </view>
 
@@ -56,9 +89,10 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
 import { PREF_LABEL } from '../../common/config.js'
+import { errMsg } from '../../common/util.js'
 
 const user = ref({})
-const stats = ref({ mealCount: 0, unlocked: 0, badgeCount: 0 })
+const stats = ref({ mealCount: 0, planCount: 0, unlocked: 0, badgeCount: 0 })
 const nickname = ref('')
 const tags = ref([])
 const oldPwd = ref('')
@@ -77,7 +111,7 @@ async function load() {
     nickname.value = p.user ? p.user.nickname || '' : ''
     tags.value = pref.tags || []
   } catch (e) {
-    /* ignore */
+    /* 首屏拉取失败保留上次数据 */
   }
 }
 
@@ -88,7 +122,7 @@ async function saveNickname() {
     uni.setStorageSync('user', d.user)
     uni.showToast({ title: '已保存', icon: 'none' })
   } catch (e) {
-    uni.showToast({ title: e.message, icon: 'none' })
+    uni.showToast({ title: errMsg(e), icon: 'none' })
   }
 }
 
@@ -111,7 +145,7 @@ async function savePrefs() {
     await api.put('/api/user/preferences', { preferences })
     uni.showToast({ title: '偏好已保存', icon: 'none' })
   } catch (e) {
-    uni.showToast({ title: e.message, icon: 'none' })
+    uni.showToast({ title: errMsg(e), icon: 'none' })
   }
 }
 
@@ -123,13 +157,15 @@ async function changePwd() {
     newPwd.value = ''
     uni.showToast({ title: '密码已修改', icon: 'none' })
   } catch (e) {
-    uni.showToast({ title: e.message, icon: 'none' })
+    uni.showToast({ title: errMsg(e), icon: 'none' })
   }
 }
 
-function goAdmin() {
-  uni.navigateTo({ url: '/pages/admin/admin' })
-}
+function goAdmin() { uni.navigateTo({ url: '/pages/admin/admin' }) }
+function goHistory() { uni.navigateTo({ url: '/pages/history/history' }) }
+function goPlan() { uni.navigateTo({ url: '/pages/plan/plan' }) }
+function goEncyclopedia() { uni.switchTab({ url: '/pages/encyclopedia/encyclopedia' }) }
+function goWorld() { uni.switchTab({ url: '/pages/world/world' }) }
 
 function logout() {
   api.post('/api/auth/logout').catch(() => {})
@@ -150,6 +186,8 @@ onShow(() => load())
 .stats { margin-top: 26rpx; }
 .stat { flex: 1; text-align: center; }
 .stat-num { display: block; font-size: 34rpx; font-weight: 700; }
+.cell { display: flex; align-items: center; padding: 22rpx 0; border-bottom: 1rpx solid #f1f2f5; }
+.cell:last-child { border-bottom: none; }
 .tag { cursor: pointer; }
 .pref-like { background: #e6f7ea; color: #2f9e44; }
 .pref-dislike { background: #f1f2f5; color: #5b6470; }
