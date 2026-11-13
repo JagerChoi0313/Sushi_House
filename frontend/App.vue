@@ -9,6 +9,36 @@ export default {
 </script>
 
 <style>
+/* ——— 动效（第 6 条）———
+   节奏参考麦当劳小程序那类快餐点单页：240–320ms、ease-out，位移小（8–14rpx），
+   不用弹跳、不做长动画。小程序里 transform/opacity 走 GPU 合成，比改 top/height 省。 */
+@keyframes lc-fade-up {
+  from { opacity: 0; transform: translateY(14rpx); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lc-pop-in {
+  0%   { opacity: 0; transform: scale(.94); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes lc-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .62; }
+}
+/* 卡片进场：默认就用，任何页面加 .anim-card 即可 */
+.anim-card { animation: lc-fade-up .28s ease-out both; }
+.anim-pop  { animation: lc-pop-in .26s ease-out both; }
+.anim-pulse { animation: lc-pulse 1.1s ease-in-out infinite; }
+/* 列表错开进场：给 .anim-list 下的直接子元素按序号加延迟（最多 8 项，再多不值当） */
+.anim-list > view { animation: lc-fade-up .28s ease-out both; }
+.anim-list > view:nth-child(1) { animation-delay: .02s; }
+.anim-list > view:nth-child(2) { animation-delay: .06s; }
+.anim-list > view:nth-child(3) { animation-delay: .10s; }
+.anim-list > view:nth-child(4) { animation-delay: .14s; }
+.anim-list > view:nth-child(5) { animation-delay: .18s; }
+.anim-list > view:nth-child(6) { animation-delay: .22s; }
+.anim-list > view:nth-child(7) { animation-delay: .26s; }
+.anim-list > view:nth-child(8) { animation-delay: .30s; }
+
 page {
   background: #f5f6f8;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;

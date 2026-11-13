@@ -65,16 +65,18 @@
         <text class="muted" @tap="go('/pages/history/history')">全部 ›</text>
       </view>
       <view v-if="!meals.length" class="empty">还没有记录，去记一顿吧</view>
-      <view v-for="m in meals" :key="m.id" class="meal-row" @tap="go('/pages/mealDetail/mealDetail?id=' + m.id)">
-        <view class="flex1">
-          <text class="meal-date">{{ fmtDate(m.eaten_at) }}</text>
-          <text class="muted"> {{ m.item_count }} 道菜 · 实付 ¥{{ m.actual_paid == null ? '—' : m.actual_paid }}</text>
+      <view class="anim-list">
+        <view v-for="m in meals" :key="m.id" class="meal-row" @tap="go('/pages/mealDetail/mealDetail?id=' + m.id)">
+          <view class="flex1">
+            <text class="meal-date">{{ fmtDate(m.eaten_at) }}</text>
+            <text class="muted"> {{ m.item_count }} 道菜 · 实付 ¥{{ m.actual_paid == null ? '—' : m.actual_paid }}</text>
+          </view>
+          <text v-if="m.status === 'void'" class="pill void">已作废</text>
+          <view v-else-if="m.status === 'confirmed' && m.tier" class="pill" :style="{ background: tierBg(m.tier), color: tierFg(m.tier) }">
+            {{ tierLabel(m.tier) }} · {{ m.score }}分
+          </view>
+          <text v-else class="muted">草稿</text>
         </view>
-        <text v-if="m.status === 'void'" class="pill void">已作废</text>
-        <view v-else-if="m.status === 'confirmed' && m.tier" class="pill" :style="{ background: tierBg(m.tier), color: tierFg(m.tier) }">
-          {{ tierLabel(m.tier) }} · {{ m.score }}分
-        </view>
-        <text v-else class="muted">草稿</text>
       </view>
     </view>
   </view>
