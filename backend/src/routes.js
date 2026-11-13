@@ -330,6 +330,14 @@ async function listDishes({ db, query, res }) {
       for (const a of list) args.push(`%,${a},%`);
     }
   }
+  // 按菜名去重（dedupe=1）：在售 269 道里有 78 组同名重复，涉及 156 道 ——
+  // 同组的名字/价格/热量/创建时间完全一样，只有 category_id 不同（例如花壽司
+  // 同时挂在「寿司」和「其他」两个分类下），所以菜单列表看起来是一道菜出现两次。
+  // 「保留 id 最小的一份」：纯查询层过滤，不动数据、不删行。
+  // 默认不开，管理页要看全部 271 行。
+  if (query.dedupe === '1' || query.dedupe === 'true') {
+    conds.push('NOT EXISTS (SELECT 1 FROM dishes d2 WHERE d2.name = d.name AND d2.id < d.id)');
+  }
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
   // 2026-11-09 补（BUG-6）：原来一次返回全部 271 道（135 KB），前端只能自己 slice。
   // 现在支持 limit/offset，但**不给 limit 时行为与以前完全一样**（返回全部），
@@ -420,19 +428,58 @@ async function listIngredients({ db, query, res }) {
 // ===================== 餐前计划 =====================
 
 async function generatePlanHandler({ db, user, body, res }) {
-  const result = generatePlan(db, user.id, { budget: body.budget, calorieLimit: body.calorieLimit });
+  const result = generatePlan(db, user.id, {
+    budget: body.budget,
+    calorieLimit: body.calorieLimit,
+    calorieMin: body.calorieMin,
+    strategy: body.strategy,
+    kidMode: body.kidMode === true || body.kidMode === 1 || body.kidMode === '1',
+    goal: body.goal,
+  });
   if (result.error) return fail(res, result.error, 400);
   return ok(res, result);
 }
 
-async function listPlans({ db, user, res }) {
-  const plans = db
-    .prepare(
-      `SELECT p.*, (SELECT COUNT(*) FROM meal_plan_items WHERE meal_plan_id=p.id) AS item_count
-         FROM meal_plans p WHERE p.user_id=? ORDER BY p.id DESC`
-    )
-    .all(user.id);
-  return ok(res, { plans });
+// 三套对比：同一预算与热量上限，分别按「省钱 / 均衡 / 吃饱」各算一份，
+// 全部 dryRun（不落库）—— 用户挑中哪套，前端再拿那个 strategy 调 /api/plans/generate 真正落库。
+async function suggestPlans({ db, user, body, res }) {
+  const VARIANTS = [
+    { key: 'value', label: '省钱', hint: '够到目标热量就停，花的钱最少' },
+    { key: 'balanced', label: '均衡', hint: '补到上限的九成，同一道菜不重复' },
+    { key: 'full', label: '吃饱', hint: '在上限内尽力填满，最多两份' },
+  ];
+  const variants = [];
+  for (const v of VARIANTS) {
+    const r = generatePlan(db, user.id, {
+      budget: body.budget,
+      calorieLimit: body.calorieLimit,
+      calorieMin: body.calorieMin,
+      strategy: v.key,
+      dryRun: true,
+      kidMode: body.kidMode === true || body.kidMode === 1 || body.kidMode === '1',
+      goal: body.goal,
+    });
+    variants.push({ ...v, ok: !r.error, error: r.error || null, plan: r.error ? null : r });
+  }
+  const usable = variants.filter((v) => v.ok).length;
+  if (usable === 0) return fail(res, variants[0].error || '当前条件下没有可行组合', 400);
+  return ok(res, { variants, usable });
+}
+
+async function listPlans({ db, user, query, res }) {
+  // 分页（2026-11-13 加）：历史计划会一直累积，实测 505 条时整个响应 192 KB。
+  // 与 /api/dishes 保持同一套约定 —— **不给 limit 就不加 LIMIT**，老调用方行为逐字不变。
+  const limit = Math.min(Math.max(Number(query.limit) || 0, 0), 5000);
+  const offset = Math.max(Number(query.offset) || 0, 0);
+  const total = db.prepare('SELECT COUNT(*) AS n FROM meal_plans WHERE user_id=?').get(user.id).n;
+  const sql =
+    `SELECT p.*, (SELECT COUNT(*) FROM meal_plan_items WHERE meal_plan_id=p.id) AS item_count
+       FROM meal_plans p WHERE p.user_id=? ORDER BY p.id DESC` +
+    (limit ? ' LIMIT ? OFFSET ?' : '');
+  const plans = limit
+    ? db.prepare(sql).all(user.id, limit, offset)
+    : db.prepare(sql).all(user.id);
+  return ok(res, { plans, total, limit: limit || total, offset });
 }
 
 async function getPlan({ db, user, params, res }) {
@@ -605,6 +652,9 @@ async function ocrImage({ db, user, params, res }) {
 // ===================== 图鉴 / 勋章 =====================
 
 async function encyclopedia({ db, user, res }) {
+  // 按菜名去重，口径与 /api/dishes?dedupe=1 一致：
+  // 库里 78 组同名重复（156 道）会让图鉴出现一格解锁、旁边一格一模一样的还锁着。
+  // 保留 id 最小的一份；进度按「菜名」合并 —— 吃过同名的任意一份，这一格就算解锁。
   const dishes = db
     .prepare(
       `SELECT d.id, d.name, d.image, d.price, d.calories, d.status, d.category_id,
@@ -612,15 +662,45 @@ async function encyclopedia({ db, user, res }) {
          FROM dishes d
          LEFT JOIN user_dish_progress p ON p.dish_id = d.id AND p.user_id = ?
         WHERE d.status = 'on_sale'
+          AND NOT EXISTS (SELECT 1 FROM dishes d2 WHERE d2.name = d.name AND d2.id < d.id)
         ORDER BY d.category_id, d.id`
     )
     .all(user.id);
-  const total = db.prepare("SELECT COUNT(*) c FROM dishes WHERE status='on_sale'").get().c;
-  const unlocked = db.prepare('SELECT COUNT(*) c FROM user_dish_progress WHERE user_id=?').get(user.id).c;
-  return ok(res, {
-    dishes: dishes.map((d) => ({ ...d, unlocked: d.eat_count > 0 })),
-    stats: { total, unlocked },
+  const total = db
+    .prepare(
+      `SELECT COUNT(*) c FROM dishes d
+        WHERE d.status = 'on_sale'
+          AND NOT EXISTS (SELECT 1 FROM dishes d2 WHERE d2.name = d.name AND d2.id < d.id)`
+    )
+    .get().c;
+  // 同名各份的进度合并到菜名上
+  const progRows = db
+    .prepare(
+      `SELECT d.name, p.eat_count, p.portion_count, p.first_eaten_at
+         FROM user_dish_progress p JOIN dishes d ON d.id = p.dish_id
+        WHERE p.user_id = ?`
+    )
+    .all(user.id);
+  const byName = new Map();
+  for (const r of progRows) {
+    const cur = byName.get(r.name) || { eat: 0, portion: 0, first: null };
+    cur.eat = Math.max(cur.eat, r.eat_count || 0);
+    cur.portion += r.portion_count || 0;
+    if (r.first_eaten_at && (!cur.first || r.first_eaten_at < cur.first)) cur.first = r.first_eaten_at;
+    byName.set(r.name, cur);
+  }
+  const rows = dishes.map((d) => {
+    const m = byName.get(d.name);
+    return {
+      ...d,
+      eat_count: m ? Math.max(d.eat_count || 0, m.eat) : d.eat_count || 0,
+      portion_count: m ? m.portion : d.portion_count || 0,
+      first_eaten_at: m ? m.first : d.first_eaten_at,
+      unlocked: !!m,
+    };
   });
+  const unlocked = rows.filter((r) => r.unlocked).length;
+  return ok(res, { dishes: rows, stats: { total, unlocked } });
 }
 
 async function listBadges({ db, user, res }) {
@@ -975,6 +1055,7 @@ export const routes = [
   { method: 'GET', pattern: /^\/api\/world\/dishes\/(\d+)$/, handler: worldDish },
   // 餐前计划
   { method: 'POST', pattern: /^\/api\/plans\/generate$/, auth: 'user', handler: generatePlanHandler },
+  { method: 'POST', pattern: /^\/api\/plans\/suggest$/, auth: 'user', handler: suggestPlans },
   { method: 'GET', pattern: /^\/api\/plans$/, auth: 'user', handler: listPlans },
   { method: 'GET', pattern: /^\/api\/plans\/(\d+)$/, auth: 'user', handler: getPlan },
   // 餐后记录

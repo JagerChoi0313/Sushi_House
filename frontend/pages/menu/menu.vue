@@ -120,6 +120,7 @@ import { onReachBottom, onShow } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
 import { STATUS_LABEL, BASE_URL } from '../../common/config.js'
 import { errMsg } from '../../common/util.js'
+import { allergenLabel } from '../../common/allergens.js'
 
 const PAGE_STEP = 60
 
@@ -143,15 +144,7 @@ const allergens = ref([])
 const excluded = ref([])
 const excludedSet = computed(() => new Set(excluded.value))
 
-const ALLERGEN_ZH = {
-  卵: '蛋', 乳: '乳制品', 小麦: '小麦', えび: '虾', かに: '蟹', そば: '荞麦',
-  落花生: '花生', くるみ: '核桃', アーモンド: '杏仁', あわび: '鲍鱼', いか: '乌贼',
-  いくら: '鲑鱼卵', オレンジ: '橙', カシューナッツ: '腰果', キウイフルーツ: '奇异果',
-  牛肉: '牛肉', ごま: '芝麻', さけ: '鲑鱼', さば: '鲭鱼', 大豆: '大豆',
-  鶏肉: '鸡肉', バナナ: '香蕉', 豚肉: '猪肉', もも: '桃', やまいも: '山药',
-  りんご: '苹果', ゼラチン: '明胶', マカダミアナッツ: '夏威夷果',
-}
-function allergenLabel(a) { return ALLERGEN_ZH[a] || a }
+// 过敏原日文 token → 中文：抽到了 common/allergens.js，点单卡也用同一份
 function kcalOf(d) { return d.kcal_estimate != null ? d.kcal_estimate : d.calories }
 
 function toggleAllergen(a) {
@@ -186,6 +179,9 @@ async function loadDishes(append) {
     if (status.value) params.push('status=' + encodeURIComponent(status.value))
     if (search.value.trim()) params.push('search=' + encodeURIComponent(search.value.trim()))
     if (excluded.value.length) params.push('excludeAllergen=' + encodeURIComponent(excluded.value.join(',')))
+    // 按菜名去重：库里 78 组同名重复（156 道，只有分类不同）会让同一道菜在列表里出现两次。
+    // 管理页不带这个参数，那边要看全部 271 行。
+    params.push('dedupe=1')
     params.push('limit=' + PAGE_STEP)
     params.push('offset=' + offset)
     const data = await api.get('/api/dishes?' + params.join('&'))

@@ -22,7 +22,7 @@
       <view v-if="!dishes.length" class="empty">暂无菜品</view>
       <view v-else-if="!shownDishes.length" class="empty">这个筛选下还没有菜品</view>
       <view v-else class="grid">
-        <view v-for="d in shownDishes" :key="d.id" :class="['dish-cell', d.unlocked ? 'unlocked' : 'locked']">
+        <view v-for="d in shownDishes" :key="d.id" :class="['dish-cell', d.unlocked ? 'unlocked anim-pop' : 'locked']">
           <image v-if="d.image" :src="BASE_URL + d.image" mode="aspectFill" :class="['dish-img', d.unlocked ? '' : 'dim']" lazy-load />
           <text v-else class="dish-emoji">{{ d.unlocked ? '🍣' : '🔒' }}</text>
           <text class="dish-name">{{ d.name }}</text>
@@ -98,7 +98,9 @@ const badgeFilters = [
 const dishLimit = ref(STEP)
 const badgeLimit = ref(STEP)
 
-// 图鉴列表用 stats.total 作为分母口径（后端列表含 off_sale 一条，分子分母不一致）
+// 分母与列表口径已对齐（2026-11-13）：后端按菜名去重后，列表长度 === stats.total。
+// 去重原因：库里 78 组同名重复（156 道，只有 category_id 不同），不去重会出现
+// 「一格解锁、旁边一格一模一样的还锁着」。进度按菜名合并 —— 吃过任意一份就算解锁。
 const filteredDishes = computed(() => {
   if (dishFilter.value === 'unlocked') return dishes.value.filter((d) => d.unlocked)
   if (dishFilter.value === 'locked') return dishes.value.filter((d) => !d.unlocked)
