@@ -70,7 +70,8 @@
           <text class="meal-date">{{ fmtDate(m.eaten_at) }}</text>
           <text class="muted"> {{ m.item_count }} 道菜 · 实付 ¥{{ m.actual_paid == null ? '—' : m.actual_paid }}</text>
         </view>
-        <view v-if="m.tier" class="pill" :style="{ background: tierBg(m.tier), color: tierFg(m.tier) }">
+        <text v-if="m.status === 'void'" class="pill void">已作废</text>
+        <view v-else-if="m.status === 'confirmed' && m.tier" class="pill" :style="{ background: tierBg(m.tier), color: tierFg(m.tier) }">
           {{ tierLabel(m.tier) }} · {{ m.score }}分
         </view>
         <text v-else class="muted">草稿</text>
@@ -148,4 +149,5 @@ onShow(() => load())
 .meal-row { display: flex; align-items: center; padding: 20rpx 0; border-bottom: 1rpx solid #f1f2f5; }
 .meal-row:last-child { border-bottom: none; }
 .meal-date { font-size: 26rpx; color: #1f2329; }
+.void { background: #fdeaea; color: #e64a45; }
 </style>

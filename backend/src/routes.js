@@ -69,7 +69,9 @@ function insertMealItems(db, mealId, items) {
     if (dishId != null) {
       const d = db.prepare('SELECT * FROM dishes WHERE id=?').get(dishId);
       if (d) {
-        if (name == null) name = d.name;
+        // 菜名以菜品表为准：dish_name 只是下单当时的快照，客户端传什么就存什么，
+        // 历史上因此被写入过占位符 'x'。只有菜品表里名字为空时才沿用客户端值。
+        if (d.name && String(d.name).trim()) name = d.name;
         if (price == null) price = d.price;
         if (cal == null) cal = d.calories;
       } else {
@@ -93,7 +95,13 @@ function mealDetail(db, mealId, userId) {
   if (!meal) return null;
   const items = db
     .prepare(
-      `SELECT mi.*, d.image AS dish_image
+      // 菜名以 dishes 表为准，meal_items.dish_name 只作兜底快照：
+      // 快照是下单当时客户端传来的字符串（历史上被写成过占位符 'x'），
+      // 只有菜品行已不存在时才回退到它。
+      `SELECT mi.id, mi.meal_id, mi.dish_id,
+              COALESCE(NULLIF(TRIM(d.name), ''), mi.dish_name) AS dish_name,
+              mi.quantity, mi.unit_price, mi.unit_calories, mi.source, mi.created_at,
+              d.image AS dish_image
          FROM meal_items mi LEFT JOIN dishes d ON d.id = mi.dish_id
         WHERE mi.meal_id = ? ORDER BY mi.id`
     )
