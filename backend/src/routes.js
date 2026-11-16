@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { ok, fail, round } from './util.js';
 import { makePassword, checkPassword, newToken, sha256 } from './auth.js';
 import { generatePlan } from './recommend.js';
@@ -282,8 +282,19 @@ async function listDishes({ db, query, res }) {
   const conds = [];
   const args = [];
   if (query.categoryId) {
-    conds.push('d.category_id = ?');
-    args.push(Number(query.categoryId));
+    // 审计修复：英文模式下「甜点/甜點」这类简繁同义分类会被聚合成一个 chip，
+    // 于是前端会把两个 id 一起传过来（categoryId=1,5）。单值时行为不变。
+    const ids = String(query.categoryId)
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (ids.length === 1) {
+      conds.push('d.category_id = ?');
+      args.push(ids[0]);
+    } else if (ids.length > 1) {
+      conds.push(`d.category_id IN (${ids.map(() => '?').join(',')})`);
+      args.push(...ids);
+    }
   }
   if (query.status) {
     const statuses = String(query.status)
@@ -433,6 +444,10 @@ async function generatePlanHandler({ db, user, body, res }) {
     calorieLimit: body.calorieLimit,
     calorieMin: body.calorieMin,
     strategy: body.strategy,
+    // dryRun 之前只存在于 recommend.js，HTTP 层没透传 —— 也就是说
+    // 「只算一份给我看看、别存历史」这件事接口做不到，客户端只能先落库再删。
+    // 现在透传：body.dryRun 为 true 时不写 meal_plans，返回的 planId 为 null。
+    dryRun: body.dryRun === true || body.dryRun === 1 || body.dryRun === '1',
     kidMode: body.kidMode === true || body.kidMode === 1 || body.kidMode === '1',
     goal: body.goal,
   });
@@ -607,6 +622,114 @@ async function voidMealHandler({ db, user, params, res }) {
   recomputeProgress(db, user.id);
   revokeUnearnedBadges(db, user.id);
   return ok(res, { mealId, status: 'void' });
+}
+
+// ===================== 用户删除自己的数据（审计 B3） =====================
+//
+// 旧版本里 DELETE 只有 4 条、全是管理员删菜品/分类/标签/勋章规则 ——
+// 用户自己的用餐记录只能「作废」（行还在），上传的照片和推荐计划完全没有删除入口。
+// 而 /uploads/* 当时还是无鉴权静态目录，一旦链接外流就永久公开。
+// 下面三个 handler 补齐「用户能撤回自己的东西」。
+
+/** DELETE /api/meals/:id —— 物理删除一条用餐记录（含明细与评级），并回滚图鉴/勋章 */
+async function deleteMeal({ db, user, params, res }) {
+  const mealId = Number(params[0]);
+  const meal = db.prepare('SELECT * FROM meals WHERE id=? AND user_id=?').get(mealId, user.id);
+  if (!meal) return fail(res, '记录不存在', 404);
+
+  // 先把这条记录关联的照片解绑（照片属于用户，不跟着记录一起删，由 /api/uploads/:id 单独删）
+  const uploads = db.prepare('SELECT id FROM meal_uploads WHERE meal_id=? AND user_id=?').all(mealId, user.id);
+
+  db.exec('BEGIN');
+  try {
+    // meal_items / meal_evaluations 都是 ON DELETE CASCADE，但显式删一遍不依赖 PRAGMA 是否开着
+    db.prepare('DELETE FROM meal_evaluations WHERE meal_id=?').run(mealId);
+    db.prepare('DELETE FROM meal_items WHERE meal_id=?').run(mealId);
+    db.prepare('DELETE FROM meals WHERE id=? AND user_id=?').run(mealId, user.id);
+    // 计划本身保留（它是「当时的推荐」），只把引用断开
+    db.prepare('UPDATE meal_uploads SET meal_id=NULL WHERE meal_id=? AND user_id=?').run(mealId, user.id);
+    recomputeProgress(db, user.id);
+    revokeUnearnedBadges(db, user.id);
+    db.exec('COMMIT');
+  } catch (e) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+  return ok(res, { mealId, deleted: true, detachedUploads: uploads.length });
+}
+
+/** DELETE /api/uploads/:id —— 删除一张自己上传的照片（含磁盘文件） */
+async function deleteUpload({ db, user, params, res }) {
+  const id = Number(params[0]);
+  const up = db.prepare('SELECT * FROM meal_uploads WHERE id=? AND user_id=?').get(id, user.id);
+  if (!up) return fail(res, '上传记录不存在', 404);
+
+  // 只删自己上传的：菜单菜品图不在 meal_uploads 里，不会被这条路径碰到
+  db.prepare('DELETE FROM meal_uploads WHERE id=? AND user_id=?').run(id, user.id);
+  let removed = false;
+  try {
+    const file = path.join(UPLOAD_DIR, path.basename(up.file_path));
+    if (existsSync(file)) {
+      unlinkSync(file);
+      removed = true;
+    }
+  } catch {
+    // 文件删不掉不该让接口失败 —— 记录已经没了，界面看不到这张图
+  }
+  return ok(res, { uploadId: id, deleted: true, fileRemoved: removed });
+}
+
+/** DELETE /api/plans/:id —— 删除一条自己的推荐计划（含明细） */
+async function deletePlan({ db, user, params, res }) {
+  const id = Number(params[0]);
+  const plan = db.prepare('SELECT * FROM meal_plans WHERE id=? AND user_id=?').get(id, user.id);
+  if (!plan) return fail(res, '计划不存在', 404);
+  // 被用餐记录引用过就不断言删除 —— 那条记录会变成「找不到计划」，理由是它确实用过了
+  const used = db.prepare('SELECT COUNT(*) AS n FROM meals WHERE plan_id=?').get(id).n;
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM meal_plan_items WHERE meal_plan_id=?').run(id);
+    db.prepare('DELETE FROM meal_plans WHERE id=? AND user_id=?').run(id, user.id);
+    db.exec('COMMIT');
+  } catch (e) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+  return ok(res, { planId: id, deleted: true, usedByMeals: used });
+}
+
+/** DELETE /api/plans —— 清空自己的历史计划（演示数据太多时用；不影响用餐记录） */
+async function clearPlans({ db, user, res }) {
+  const usedIds = db
+    .prepare('SELECT DISTINCT plan_id FROM meals WHERE user_id=? AND plan_id IS NOT NULL')
+    .all(user.id)
+    .map((r) => r.plan_id);
+  const keep = usedIds.length ? `AND id NOT IN (${usedIds.map(() => '?').join(',')})` : '';
+  const before = db.prepare(`SELECT COUNT(*) AS n FROM meal_plans WHERE user_id=? ${keep}`).get(user.id, ...usedIds).n;
+  db.exec('BEGIN');
+  try {
+    db.prepare(
+      `DELETE FROM meal_plan_items WHERE meal_plan_id IN (SELECT id FROM meal_plans WHERE user_id=? ${keep})`
+    ).run(user.id, ...usedIds);
+    db.prepare(`DELETE FROM meal_plans WHERE user_id=? ${keep}`).run(user.id, ...usedIds);
+    db.exec('COMMIT');
+  } catch (e) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+  return ok(res, { cleared: before, keptReferenced: usedIds.length });
 }
 
 // ===================== 上传 / 识别 =====================
@@ -932,8 +1055,19 @@ async function worldDishes({ db, query, res }) {
     args.push(String(query.region));
   }
   if (query.category) {
-    conds.push('category = ?');
-    args.push(String(query.category));
+    // 审计修复：同上。世界菜单的分类简繁混存（握寿司 / 握壽司），
+    // 英文模式聚合成一个 chip 后会把多个原值一起传。
+    const cats = String(query.category)
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (cats.length === 1) {
+      conds.push('category = ?');
+      args.push(cats[0]);
+    } else if (cats.length > 1) {
+      conds.push(`category IN (${cats.map(() => '?').join(',')})`);
+      args.push(...cats);
+    }
   }
   if (query.search) {
     const s = '%' + String(query.search).trim() + '%';
@@ -1058,16 +1192,21 @@ export const routes = [
   { method: 'POST', pattern: /^\/api\/plans\/suggest$/, auth: 'user', handler: suggestPlans },
   { method: 'GET', pattern: /^\/api\/plans$/, auth: 'user', handler: listPlans },
   { method: 'GET', pattern: /^\/api\/plans\/(\d+)$/, auth: 'user', handler: getPlan },
+  // 用户撤回自己的东西（审计 B3）
+  { method: 'DELETE', pattern: /^\/api\/plans\/(\d+)$/, auth: 'user', handler: deletePlan },
+  { method: 'DELETE', pattern: /^\/api\/plans$/, auth: 'user', handler: clearPlans },
   // 餐后记录
   { method: 'POST', pattern: /^\/api\/meals$/, auth: 'user', handler: createMeal },
   { method: 'GET', pattern: /^\/api\/meals$/, auth: 'user', handler: listMeals },
   { method: 'GET', pattern: /^\/api\/meals\/(\d+)$/, auth: 'user', handler: getMeal },
   { method: 'PUT', pattern: /^\/api\/meals\/(\d+)$/, auth: 'user', handler: updateMeal },
+  { method: 'DELETE', pattern: /^\/api\/meals\/(\d+)$/, auth: 'user', handler: deleteMeal },
   { method: 'POST', pattern: /^\/api\/meals\/(\d+)\/confirm$/, auth: 'user', handler: confirmMealHandler },
   { method: 'POST', pattern: /^\/api\/meals\/(\d+)\/void$/, auth: 'user', handler: voidMealHandler },
   // 上传 / 识别
   { method: 'POST', pattern: /^\/api\/uploads$/, auth: 'user', handler: uploadImage },
   { method: 'POST', pattern: /^\/api\/uploads\/(\d+)\/ocr$/, auth: 'user', handler: ocrImage },
+  { method: 'DELETE', pattern: /^\/api\/uploads\/(\d+)$/, auth: 'user', handler: deleteUpload },
   // 图鉴 / 勋章
   { method: 'GET', pattern: /^\/api\/encyclopedia$/, auth: 'user', handler: encyclopedia },
   { method: 'GET', pattern: /^\/api\/badges$/, auth: 'user', handler: listBadges },

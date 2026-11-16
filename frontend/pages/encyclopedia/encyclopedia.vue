@@ -1,11 +1,11 @@
 <template>
-  <view class="page">
+  <view class="page" :class="{ 'no-anim': noAnim }">
     <view class="tabs">
-      <view :class="['tab', tab === 'dish' ? 'active' : '']" @tap="tab = 'dish'">
-        图鉴 {{ encStats.unlocked }}/{{ encStats.total }}
+      <view :class="['tab', tab === 'dish' ? 'active' : '']" @tap="tab = 'dish'" aria-role="button">
+        {{ t('图鉴 {a}/{b}', { a: encStats.unlocked, b: encStats.total }) }}
       </view>
-      <view :class="['tab', tab === 'badge' ? 'active' : '']" @tap="tab = 'badge'">
-        勋章 {{ badgeStats.owned }}/{{ badgeStats.total }}
+      <view :class="['tab', tab === 'badge' ? 'active' : '']" @tap="tab = 'badge'" aria-role="button">
+        {{ t('勋章 {a}/{b}', { a: badgeStats.owned, b: badgeStats.total }) }}
       </view>
     </view>
 
@@ -15,24 +15,25 @@
           v-for="f in dishFilters"
           :key="f.value"
           :class="['chip', dishFilter === f.value ? 'active' : '']"
-          @tap="setDishFilter(f.value)"
-        >{{ f.label }}</view>
+          @tap="setDishFilter(f.value)" aria-role="button"
+        >{{ t(f.label) }}</view>
       </view>
 
-      <view v-if="!dishes.length" class="empty">暂无菜品</view>
-      <view v-else-if="!shownDishes.length" class="empty">这个筛选下还没有菜品</view>
+      <view v-if="loadErr" class="empty">{{ t('连不上后端，请先启动服务后重新进入') }}</view>
+      <view v-else-if="!dishes.length" class="empty">{{ t('暂无菜品') }}</view>
+      <view v-else-if="!shownDishes.length" class="empty">{{ t('这个筛选下还没有菜品') }}</view>
       <view v-else class="grid">
         <view v-for="d in shownDishes" :key="d.id" :class="['dish-cell', d.unlocked ? 'unlocked anim-pop' : 'locked']">
           <image v-if="d.image" :src="BASE_URL + d.image" mode="aspectFill" :class="['dish-img', d.unlocked ? '' : 'dim']" lazy-load />
           <text v-else class="dish-emoji">{{ d.unlocked ? '🍣' : '🔒' }}</text>
-          <text class="dish-name">{{ d.name }}</text>
-          <text v-if="d.unlocked" class="muted">{{ d.eat_count }} 次 · {{ d.portion_count }} 份</text>
-          <text v-else class="muted">未解锁</text>
+          <text class="dish-name">{{ zh(d.name) }}</text>
+          <text v-if="d.unlocked" class="muted">{{ t('{n} 次 · {m} 份', { n: d.eat_count, m: d.portion_count }) }}</text>
+          <text v-else class="muted">{{ t('未解锁') }}</text>
         </view>
       </view>
 
       <view v-if="shownDishes.length < filteredDishes.length" class="load-more">
-        <text class="more-link" @tap="showMore">加载更多（{{ shownDishes.length }}/{{ filteredDishes.length }}）</text>
+        <text class="more-link" @tap="showMore" aria-role="button">{{ t('加载更多（{a}/{b}）', { a: shownDishes.length, b: filteredDishes.length }) }}</text>
       </view>
     </view>
 
@@ -42,17 +43,17 @@
           v-for="f in badgeFilters"
           :key="f.value"
           :class="['chip', badgeFilter === f.value ? 'active' : '']"
-          @tap="badgeFilter = f.value"
-        >{{ f.label }}</view>
+          @tap="badgeFilter = f.value" aria-role="button"
+        >{{ t(f.label) }}</view>
       </view>
 
-      <view v-if="!badges.length" class="empty">暂无勋章</view>
-      <view v-else-if="!shownBadges.length" class="empty">这个筛选下还没有勋章</view>
+      <view v-if="!badges.length" class="empty">{{ t('暂无勋章') }}</view>
+      <view v-else-if="!shownBadges.length" class="empty">{{ t('这个筛选下还没有勋章') }}</view>
       <view v-for="b in shownBadges" :key="b.id" class="card badge-row">
         <text class="badge-icon">{{ b.owned ? '🏅' : '🔒' }}</text>
         <view class="flex1">
-          <text class="badge-name">{{ b.name }}</text>
-          <text class="muted badge-desc">{{ b.description }}</text>
+          <text class="badge-name">{{ badgeLabel(b.name) }}</text>
+          <text class="muted badge-desc">{{ badgeDesc(b.description) }}</text>
           <view class="progress">
             <view class="progress-bar" :style="{ width: progressPct(b) + '%' }"></view>
           </view>
@@ -61,7 +62,7 @@
       </view>
 
       <view v-if="shownBadges.length < filteredBadges.length" class="load-more">
-        <text class="more-link" @tap="showMoreBadge">加载更多（{{ shownBadges.length }}/{{ filteredBadges.length }}）</text>
+        <text class="more-link" @tap="showMoreBadge" aria-role="button">{{ t('加载更多（{a}/{b}）', { a: shownBadges.length, b: filteredBadges.length }) }}</text>
       </view>
     </view>
   </view>
@@ -69,10 +70,27 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+// 审计 B7：动效开关。系统「减弱动态效果」由 CSS 的 prefers-reduced-motion 兜住，
+// 这里再给一个应用内开关 —— 有些人不改系统设置，但确实会被闪动影响。
+const noAnim = ref(false)
+function syncNoAnim() {
+  try {
+    noAnim.value = uni.getStorageSync('noAnim') === true
+  } catch {
+    noAnim.value = false
+  }
+}
+syncNoAnim()
+
 import { onReachBottom, onShow } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
 import { BASE_URL } from '../../common/config.js'
-import { errMsg } from '../../common/util.js'
+import { errMsg, zh } from '../../common/util.js'
+import { t, useLocale } from '../../common/i18n.js'
+import { badgeDesc, badgeLabel } from '../../common/i18nData.js'
+
+// 语言：切页时同步 storage 并重刷导航栏 / tabBar 文案
+useLocale('寿司图鉴')
 
 const STEP = 60
 
@@ -83,6 +101,8 @@ const badges = ref([])
 const badgeStats = ref({ owned: 0, total: 0 })
 
 const dishFilter = ref('all')
+// 加载失败 ≠ 图鉴是空的。前者是后端没起来，后者是数据真的没有。
+const loadErr = ref(false)
 const dishFilters = [
   { label: '全部', value: 'all' },
   { label: '已解锁', value: 'unlocked' },
@@ -134,11 +154,13 @@ function progressPct(b) {
 async function load() {
   try {
     const [e, b] = await Promise.all([api.get('/api/encyclopedia'), api.get('/api/badges')])
+    loadErr.value = false
     dishes.value = e.dishes || []
     encStats.value = e.stats || encStats.value
     badges.value = b.badges || []
     badgeStats.value = { owned: b.ownedCount, total: b.total }
   } catch (err) {
+    loadErr.value = true
     uni.showToast({ title: errMsg(err), icon: 'none' })
   }
 }
@@ -154,13 +176,13 @@ onReachBottom(() => {
 <style scoped>
 .tabs { display: flex; background: #f1f2f5; border-radius: 16rpx; padding: 6rpx; margin-bottom: 24rpx; }
 .tab { flex: 1; text-align: center; padding: 20rpx 0; border-radius: 12rpx; font-size: 28rpx; color: #5b6470; }
-.tab.active { background: #fff; color: #e64a45; font-weight: 600; }
+.tab.active { background: #fff; color: #c0392f; font-weight: 600; }
 .filters { margin-bottom: 20rpx; }
 .chip {
   display: inline-block; padding: 10rpx 24rpx; margin: 0 12rpx 8rpx 0;
   border-radius: 999rpx; background: #fff; color: #5b6470; font-size: 24rpx;
 }
-.chip.active { background: #e64a45; color: #fff; }
+.chip.active { background: #c0392f; color: #fff; }
 .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16rpx; }
 .dish-cell {
   background: #fff; border-radius: 18rpx; padding: 20rpx 14rpx; text-align: center;
@@ -176,7 +198,7 @@ onReachBottom(() => {
 .badge-name { display: block; font-size: 28rpx; font-weight: 600; }
 .badge-desc { display: block; margin: 6rpx 0 12rpx; line-height: 1.5; }
 .progress { height: 10rpx; background: #f1f2f5; border-radius: 999rpx; overflow: hidden; margin-bottom: 8rpx; }
-.progress-bar { height: 100%; background: linear-gradient(90deg, #f59f00, #e64a45); }
+.progress-bar { height: 100%; background: linear-gradient(90deg, #c47f00, #c0392f); }
 .load-more { text-align: center; padding: 16rpx 0 40rpx; }
-.more-link { color: #3b82f6; font-size: 26rpx; }
+.more-link { color: #2563a8; font-size: 26rpx; }
 </style>

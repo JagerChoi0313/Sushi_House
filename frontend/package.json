@@ -1,0 +1,10 @@
+{
+  "name": "sushi-house-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "寿司朗点餐测评 · H5 本地预览用（HBuilderX 项目本体不含 package.json）",
+  "type": "module",
+  "scripts": {
+    "dev:h5": "node _hxdev.mjs 5199"
+  }
+}

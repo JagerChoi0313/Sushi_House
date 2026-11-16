@@ -51,3 +51,8 @@ database/*.bak-*
 docs/_tmp_*.json
 # 微信开发者工具的个人私有配置（appid 与共享配置在 project.config.json 里）
 frontend/project.private.config.json
+
+# ---- 2026-11-16 补：H5 本地预览脚手架（体积大 / 含本机绝对路径，不入库）----
+frontend/.hxcli/
+frontend/_hxdev.mjs
+frontend/unpackage/

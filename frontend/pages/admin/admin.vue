@@ -2,98 +2,98 @@
   <view class="page">
     <view class="card">
       <view class="row between">
-        <text class="section-title">菜品管理（{{ dishes.length }}）</text>
-        <view class="btn btn-sm btn-primary" @tap="openForm()">＋ 新增</view>
+        <text class="section-title">{{ t('菜品管理（{n}）', { n: dishes.length }) }}</text>
+        <view class="btn btn-sm btn-primary" @tap="openForm()" aria-role="button">{{ t('＋ 新增') }}</view>
       </view>
       <view v-for="d in dishes" :key="d.id" class="admin-row">
         <image v-if="d.image" :src="BASE_URL + d.image" mode="aspectFill" class="dish-thumb" />
         <view class="flex1">
           <text class="dish-name">{{ d.name }}</text>
-          <text class="muted row-sub">¥{{ d.price }} · {{ d.calories != null ? d.calories + ' kcal' : '热量未录入' }} · {{ STATUS_LABEL[d.status] }}</text>
+          <text class="muted row-sub">¥{{ d.price }} · {{ d.calories != null ? d.calories + ' kcal' : t('热量未录入') }} · {{ t(STATUS_LABEL[d.status]) }}</text>
         </view>
-        <text class="link" @tap="openForm(d)">编辑</text>
-        <text class="link danger" @tap="removeDish(d)">删除</text>
+        <text class="link" @tap="openForm(d)" aria-role="button">{{ t('编辑') }}</text>
+        <text class="link danger" @tap="removeDish(d)" aria-role="button">{{ t('删除') }}</text>
       </view>
     </view>
 
     <view class="card">
-      <text class="section-title">分类 / 标签</text>
+      <text class="section-title">{{ t('分类 / 标签') }}</text>
       <view class="row">
-        <input class="input flex1" v-model="newCategory" placeholder="新分类名" />
-        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addCategory">添加</view>
+        <input class="input flex1" v-model="newCategory" :placeholder="t('新分类名')" />
+        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addCategory" aria-role="button">{{ t('添加') }}</view>
       </view>
       <view class="row" style="margin-top: 12rpx">
-        <input class="input flex1" v-model="newTag" placeholder="新标签名（食材/口味）" />
-        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addTag">添加</view>
+        <input class="input flex1" v-model="newTag" :placeholder="t('新标签名（食材/口味）')" />
+        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addTag" aria-role="button">{{ t('添加') }}</view>
       </view>
     </view>
 
     <view class="card">
-      <text class="section-title">勋章门槛</text>
+      <text class="section-title">{{ t('勋章门槛') }}</text>
       <view class="row">
-        <input class="input flex1" v-model="badgeName" placeholder="勋章名称，如 天妇罗达人" />
+        <input class="input flex1" v-model="badgeName" :placeholder="t('勋章名称，如 天妇罗达人')" />
       </view>
       <view class="row" style="margin-top: 12rpx">
         <picker :range="tagNames" @change="onBadgeTagChange">
-          <view class="input" style="margin-right: 12rpx">目标：{{ badgeTagName }}</view>
+          <view class="input" style="margin-right: 12rpx">{{ t('目标：{n}', { n: badgeTagName }) }}</view>
         </picker>
-        <input class="input" style="width: 160rpx" type="number" v-model="badgeCount" placeholder="次数" />
-        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addBadgeRule">添加</view>
+        <input class="input" style="width: 160rpx" type="number" v-model="badgeCount" :placeholder="t('次数')" />
+        <view class="btn btn-sm btn-primary" style="margin-left: 12rpx" @tap="addBadgeRule" aria-role="button">{{ t('添加') }}</view>
       </view>
       <view class="divider"></view>
       <view v-for="b in badgeRules" :key="b.id" class="admin-row">
         <view class="flex1">
-          <text class="dish-name">{{ b.name }}</text>
-          <text class="muted row-sub">{{ b.type === 'unlock' ? '首尝解锁' : '累计' }} · 需要 {{ b.required_count }} 次</text>
+          <text class="dish-name">{{ badgeLabel(b.name) }}</text>
+          <text class="muted row-sub">{{ b.type === 'unlock' ? t('首尝解锁') : t('累计') + ' · ' + t('需要 {n} 次', { n: b.required_count }) }}</text>
         </view>
-        <text class="muted">{{ b.description }}</text>
+        <text class="muted">{{ badgeDesc(b.description) }}</text>
       </view>
     </view>
 
-    <view v-if="showForm" class="mask" @tap="showForm = false">
-      <view class="sheet" @tap.stop>
-        <text class="title">{{ form.id ? '编辑菜品' : '新增菜品' }}</text>
-        <view class="field"><text class="label">菜名</text><input class="input" v-model="form.name" /></view>
+    <view v-if="showForm" class="mask" @tap="showForm = false" aria-role="button">
+      <view class="sheet" @tap.stop aria-role="button">
+        <text class="title">{{ form.id ? t('编辑菜品') : t('新增菜品') }}</text>
+        <view class="field"><text class="label">{{ t('菜名') }}</text><input class="input" v-model="form.name" /></view>
         <view class="field">
-          <text class="label">分类</text>
+          <text class="label">{{ t('分类') }}</text>
           <picker :range="categoryNames" @change="onCategoryChange">
             <view class="input">{{ categoryName(form.categoryId) }}</view>
           </picker>
         </view>
         <view class="row">
           <view class="field flex1" style="margin-right: 12rpx">
-            <text class="label">价格（元）</text>
+            <text class="label">{{ t('价格（元）') }}</text>
             <input class="input" type="digit" v-model="form.price" />
           </view>
           <view class="field flex1">
-            <text class="label">热量（kcal）</text>
+            <text class="label">{{ t('热量（kcal）') }}</text>
             <input class="input" type="digit" v-model="form.calories" />
           </view>
         </view>
         <view class="field">
-          <text class="label">状态</text>
+          <text class="label">{{ t('状态') }}</text>
           <picker :range="statusLabels" @change="onStatusChange">
-            <view class="input">{{ STATUS_LABEL[form.status] }}</view>
+            <view class="input">{{ t(STATUS_LABEL[form.status]) }}</view>
           </picker>
         </view>
         <view class="field" v-if="form.status === 'pending'">
-          <text class="label">预计上架日期</text>
+          <text class="label">{{ t('预计上架日期') }}</text>
           <input class="input" v-model="form.expectedDate" placeholder="2026-12-15" />
         </view>
         <view class="field">
-          <text class="label">标签</text>
+          <text class="label">{{ t('标签') }}</text>
           <view class="tags">
             <text
               v-for="t in allTags"
               :key="t.id"
               :class="['tag', form.tagIds.indexOf(t.id) >= 0 ? 'tag-on' : '']"
               @tap="toggleTag(t.id)"
-            >{{ t.name }}</text>
+            >{{ tagLabel(t.name) }}</text>
           </view>
         </view>
         <view class="row" style="margin-top: 20rpx">
-          <view class="btn btn-ghost" style="flex: 1; margin-right: 16rpx" @tap="showForm = false">取消</view>
-          <view class="btn btn-primary" style="flex: 1" @tap="submitForm">保存</view>
+          <view class="btn btn-ghost" style="flex: 1; margin-right: 16rpx" @tap="showForm = false" aria-role="button">{{ t('取消') }}</view>
+          <view class="btn btn-primary" style="flex: 1" @tap="submitForm" aria-role="button">{{ t('保存') }}</view>
         </view>
       </view>
     </view>
@@ -105,6 +105,11 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '../../common/api.js'
 import { STATUS_LABEL, BASE_URL } from '../../common/config.js'
+import { t, useLocale } from '../../common/i18n.js'
+import { badgeDesc, badgeLabel, catLabel, tagLabel } from '../../common/i18nData.js'
+
+// 语言：切页时同步 storage 并重刷导航栏 / tabBar 文案
+useLocale('管理后台')
 
 const dishes = ref([])
 const categories = ref([])
@@ -125,15 +130,15 @@ const statusOptions = [
   { label: '待上架', value: 'pending' },
   { label: '已下架', value: 'off_sale' },
 ]
-const statusLabels = computed(() => statusOptions.map((s) => s.label))
-const categoryNames = computed(() => categories.value.map((c) => c.name))
-const tagNames = computed(() => allTags.value.map((t) => t.name))
-const badgeTagName = computed(() => (allTags.value[badgeTagIndex.value] ? allTags.value[badgeTagIndex.value].name : '选择标签'))
+const statusLabels = computed(() => statusOptions.map((s) => t(s.label)))
+const categoryNames = computed(() => categories.value.map((c) => catLabel(c.name)))
+const tagNames = computed(() => allTags.value.map((tg) => tagLabel(tg.name)))
+const badgeTagName = computed(() => (allTags.value[badgeTagIndex.value] ? tagLabel(allTags.value[badgeTagIndex.value].name) : t('选择标签')))
 
 function toast(t) { uni.showToast({ title: t, icon: 'none' }) }
 function categoryName(id) {
   const c = categories.value.find((x) => x.id === id)
-  return c ? c.name : '未分类'
+  return c ? catLabel(c.name) : t('未分类')
 }
 
 function onCategoryChange(e) {
@@ -188,7 +193,7 @@ async function load() {
 }
 
 async function submitForm() {
-  if (!form.value.name.trim()) return toast('请填写菜名')
+  if (!form.value.name.trim()) return toast(t('请填写菜名'))
   const payload = {
     name: form.value.name.trim(),
     categoryId: form.value.categoryId,
@@ -202,7 +207,7 @@ async function submitForm() {
     if (form.value.id) await api.put('/api/admin/dishes/' + form.value.id, payload)
     else await api.post('/api/admin/dishes', payload)
     showForm.value = false
-    toast('已保存')
+    toast(t('已保存'))
     load()
   } catch (e) {
     toast(e.message)
@@ -211,12 +216,13 @@ async function submitForm() {
 
 async function removeDish(d) {
   const ok = await new Promise((r) =>
-    uni.showModal({ title: '删除菜品', content: '确定删除「' + d.name + '」？历史记录中的菜品会保留。', success: (res) => r(res.confirm) })
+    uni.showModal({ title: t('删除菜品'), content: t('确定删除「{n}」？历史记录中的菜品会保留。', { n: d.name }), cancelText: t('取消'), confirmText: t('确定'),
+      success: (res) => r(res.confirm) })
   )
   if (!ok) return
   try {
     await api.del('/api/admin/dishes/' + d.id)
-    toast('已删除')
+    toast(t('已删除'))
     load()
   } catch (e) {
     toast(e.message)
@@ -224,11 +230,11 @@ async function removeDish(d) {
 }
 
 async function addCategory() {
-  if (!newCategory.value.trim()) return toast('请输入分类名')
+  if (!newCategory.value.trim()) return toast(t('请输入分类名'))
   try {
     await api.post('/api/admin/categories', { name: newCategory.value.trim() })
     newCategory.value = ''
-    toast('已添加')
+    toast(t('已添加'))
     load()
   } catch (e) {
     toast(e.message)
@@ -236,11 +242,11 @@ async function addCategory() {
 }
 
 async function addTag() {
-  if (!newTag.value.trim()) return toast('请输入标签名')
+  if (!newTag.value.trim()) return toast(t('请输入标签名'))
   try {
     await api.post('/api/admin/tags', { name: newTag.value.trim() })
     newTag.value = ''
-    toast('已添加')
+    toast(t('已添加'))
     load()
   } catch (e) {
     toast(e.message)
@@ -248,19 +254,19 @@ async function addTag() {
 }
 
 async function addBadgeRule() {
-  if (!badgeName.value.trim()) return toast('请输入勋章名称')
+  if (!badgeName.value.trim()) return toast(t('请输入勋章名称'))
   const tag = allTags.value[badgeTagIndex.value]
-  if (!tag) return toast('请选择标签')
+  if (!tag) return toast(t('请选择标签'))
   try {
     await api.post('/api/admin/badge-rules', {
       type: 'milestone',
       tagId: tag.id,
       requiredCount: Number(badgeCount.value) || 1,
       name: badgeName.value.trim(),
-      description: `累计确认吃过「${tag.name}」标签菜品 ${Number(badgeCount.value) || 1} 次解锁`,
+      description: t('累计确认吃过「{t}」标签菜品 {n} 次解锁', { t: tag.name, n: Number(badgeCount.value) || 1 }),
     })
     badgeName.value = ''
-    toast('已添加')
+    toast(t('已添加'))
     load()
   } catch (e) {
     toast(e.message)
@@ -276,11 +282,11 @@ onShow(() => load())
 .dish-thumb { width: 96rpx; height: 96rpx; border-radius: 12rpx; margin-right: 20rpx; flex-shrink: 0; background: #f1f2f5; }
 .dish-name { font-size: 28rpx; font-weight: 600; }
 .row-sub { display: block; margin-top: 4rpx; }
-.link { color: #3b82f6; font-size: 26rpx; margin-left: 20rpx; }
-.danger { color: #e64a45; }
+.link { color: #2563a8; font-size: 26rpx; margin-left: 20rpx; }
+.danger { color: #c0392f; }
 .field { margin-bottom: 20rpx; }
 .label { display: block; font-size: 24rpx; color: #5b6470; margin-bottom: 10rpx; }
-.tag-on { background: #e64a45; color: #fff; }
+.tag-on { background: #c0392f; color: #fff; }
 .mask { position: fixed; left: 0; top: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-end; z-index: 99; }
 .sheet { width: 100%; background: #fff; border-radius: 28rpx 28rpx 0 0; padding: 32rpx 32rpx calc(32rpx + env(safe-area-inset-bottom)); box-sizing: border-box; max-height: 90vh; overflow-y: auto; }
 </style>

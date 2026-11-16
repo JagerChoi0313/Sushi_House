@@ -1,14 +1,22 @@
 import { round, nowStr } from './util.js';
 
-/** 五档趣味评级规则（v1） */
+/**
+ * 五档评级规则（v2）。
+ *
+ * v1 → v2 只改了 label，key 一个没动 —— key 是存在 `meal_evaluations.tier` 里的，
+ * 改 key 会让历史记录变成孤儿，所以「换掉难听的词」只能在 label 层做。
+ * v1 的标签是「夯 / 顶级 / 人上人 / NPC / 拉完了」：后两个是网络贬义词，
+ * 用来形容一个人自己吃的一顿饭，而且这个评级无处可关。审计 B4 记录了这件事。
+ * v2 换成只描述这一餐的中性词，不带对人的评价。
+ */
 export const TIER_RULES = {
-  version: 'v1',
+  version: 'v2',
   tiers: [
-    { key: 'hang', min: 90, label: '夯' },
-    { key: 'top', min: 75, label: '顶级' },
-    { key: 'elite', min: 60, label: '人上人' },
-    { key: 'npc', min: 40, label: 'NPC' },
-    { key: 'lame', min: 0, label: '拉完了' },
+    { key: 'hang', min: 90, label: '很棒' },
+    { key: 'top', min: 75, label: '不错' },
+    { key: 'elite', min: 60, label: '一般' },
+    { key: 'npc', min: 40, label: '偏多' },
+    { key: 'lame', min: 0, label: '偏少' },
   ],
 };
 
@@ -75,6 +83,9 @@ export function evaluateMeal(db, mealId) {
   //   · 2026-11-09 上午改成按标签次数计 → 一道菜挂两个喜欢标签就算 2 次；
   //     下午进一步改成按菜品计，跟「口味匹配率」这个名字对齐。
   // 没有任何偏好标签命中时给 0.5，代表「无从判断」的中性值。
+  // 审计 A9：这个 0.5 过去会被当成「一半符合」白送 10 分 —— 一个从没设过偏好的人
+  // 和一个设了偏好但刚好一半不符的人拿到完全一样的分数。现在把「无数据」和
+  // 「一半不符」分开：prefRatio 仍算 0.5 供展示，但计分时只有 prefTotal > 0 才参与。
   const prefRatio = prefTotal > 0 ? likeHit / prefTotal : 0.5;
 
   let budgetMet = null;
@@ -92,18 +103,42 @@ export function evaluateMeal(db, mealId) {
     calorieRatio = estCal / plan.calorie_limit;
   }
 
+  // 评分（审计 A10：把「有没有用推荐」从档位里拿掉）。
+  //
+  // 旧算法是固定加分制：基础 60，预算达成 +15、热量达成 +15、口味 +20。
+  // 问题在于预算与热量两项**只有关联了推荐计划才存在** ——
+  // 手记一餐的人上限是 60+20 = 80，走推荐的人上限是 60+15+15+20 = 110（clamp 100）。
+  // 同样吃得很好，走推荐就多 20 分空间，够跨两个档位，而用户完全不知道这件事。
+  //
+  // 新算法按「参与项」归一化：只有真正被评过的项进分母，最后统一折算到 50 分制。
+  // 三项齐全时与原算法逐字等价（earned 满分 50 → +50，超支/超标各 −15 也一样），
+  // 区别只在缺项时不再天然少分：没有计划的一餐若口味全中，同样能拿满。
+  //
+  // dislike 的惩罚不参与归一化 —— 踩雷是明确的负反馈，不该因为「缺数据导致分母变小」
+  // 而被放大成扣 7.5 分。
   let score = 60;
-  if (budgetMet === true) score += 15;
-  else if (budgetMet === false) {
-    // budgetDelta = 实付 - 预算，超支时为正。原实现写成 -budgetDelta，负负得正，
-    // 结果「超支反而加分」。这里改成超支越多扣分越多，上限 -15（与下面的热量分支同形）。
-    score += Math.max(-15, -15 * Math.min(1, budgetDelta / (plan.budget || 1)));
+  let earned = 0;
+  let possible = 0;
+  if (budgetMet !== null) {
+    possible += 15;
+    if (budgetMet === true) earned += 15;
+    else {
+      // budgetDelta = 实付 - 预算，超支时为正。原实现写成 -budgetDelta，负负得正，
+      // 结果「超支反而加分」。这里改成超支越多扣分越多，上限 -15（与下面的热量分支同形）。
+      earned += Math.max(-15, -15 * Math.min(1, budgetDelta / (plan.budget || 1)));
+    }
   }
-  if (calorieMet === true) score += 15;
-  else if (calorieMet === false) {
-    score += Math.max(-15, -15 * Math.min(1, calorieRatio - 1));
+  if (calorieMet !== null) {
+    possible += 15;
+    if (calorieMet === true) earned += 15;
+    else earned += Math.max(-15, -15 * Math.min(1, calorieRatio - 1));
   }
-  score += prefRatio * 20 - dislikeHit * 3;
+  if (prefTotal > 0) {
+    possible += 20;
+    earned += prefRatio * 20;
+  }
+  if (possible > 0) score += (earned / possible) * 50;
+  score += -dislikeHit * 3;
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   const tier = tierOf(score);
@@ -122,6 +157,8 @@ export function evaluateMeal(db, mealId) {
     prefTotal,
     matchedItems,
     prefCountMode: 'per-dish', // 2026-11-09 起：按菜品计；更早写下的记录是按标签次数计
+    // 计分口径（审计 A10）：参与归一化的项与它们的原始满分，便于解释「为什么这个分数」
+    scored: { earned: round(earned, 1), possible, mode: 'normalized' },
   };
 
   db.prepare(`INSERT INTO meal_evaluations
@@ -264,9 +301,26 @@ export function confirmMeal(db, mealId, userId) {
   const items = db.prepare('SELECT * FROM meal_items WHERE meal_id=?').all(mealId);
   if (items.length === 0) return { error: '请先添加菜品再确认', status: 400 };
 
-  db.prepare("UPDATE meals SET status='confirmed', updated_at=datetime('now','localtime') WHERE id=?").run(mealId);
-  const evaluation = evaluateMeal(db, mealId);
-  recomputeProgress(db, userId);
-  const newBadgeIds = awardBadges(db, userId);
-  return { evaluation, newBadgeIds };
+  // 四步写库必须是一个原子操作（审计 A11）：
+  //   UPDATE meals → INSERT 评级 → 重建图鉴进度（**先 DELETE 再重建**）→ 发勋章
+  // 原来四步裸跑，任何一步抛错都会留下不一致状态。最糟的是第三步：
+  // recomputeProgress 一进来就 `DELETE FROM user_dish_progress WHERE user_id=?`，
+  // 若删完在重建中途失败，用户**所有菜的解锁进度会被清零**（勋章也跟着掉）。
+  // node:sqlite 是同步 API，用显式 BEGIN/COMMIT 包住即可；catch 里 ROLLBACK 再抛。
+  db.exec('BEGIN');
+  try {
+    db.prepare("UPDATE meals SET status='confirmed', updated_at=datetime('now','localtime') WHERE id=?").run(mealId);
+    const evaluation = evaluateMeal(db, mealId);
+    recomputeProgress(db, userId);
+    const newBadgeIds = awardBadges(db, userId);
+    db.exec('COMMIT');
+    return { evaluation, newBadgeIds };
+  } catch (e) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* 回滚本身失败就没什么可做的了，把原始错误抛出去更有用 */
+    }
+    throw e;
+  }
 }
