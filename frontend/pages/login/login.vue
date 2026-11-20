@@ -1,7 +1,7 @@
 <template>
   <view class="login-wrap">
     <view class="brand">
-      <text class="brand-title">{{ t('🍣 寿司朗点餐测评') }}</text>
+      <text class="brand-title">{{ t('🍣 一贯点餐测评') }}</text>
       <text class="brand-sub">{{ t('优化预算 · 判断口味 · 以最低成本得到良好体验') }}</text>
     </view>
 

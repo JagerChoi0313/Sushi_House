@@ -90,7 +90,7 @@ import { t, useLocale } from '../../common/i18n.js'
 import { badgeDesc, badgeLabel } from '../../common/i18nData.js'
 
 // 语言：切页时同步 storage 并重刷导航栏 / tabBar 文案
-useLocale('寿司图鉴')
+useLocale('一贯图鉴')
 
 const STEP = 60
 

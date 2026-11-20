@@ -106,7 +106,7 @@ import { showTier, syncShowTier } from '../../common/uiPrefs.js'
 import { t, useLocale } from '../../common/i18n.js'
 
 // 语言：切页时同步 storage 并重刷导航栏 / tabBar 文案
-useLocale('寿司朗点餐测评')
+useLocale('一贯点餐测评')
 
 syncShowTier()
 

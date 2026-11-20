@@ -378,7 +378,7 @@ const DICT = {
   缺少记录编号: 'Missing record id',
 
   // ── 登录 ──
-  '🍣 寿司朗点餐测评': '🍣 Sushiro Ordering Review',
+  '🍣 一贯点餐测评': '🍣 IKKAN Ordering Review',
   '优化预算 · 判断口味 · 以最低成本得到良好体验':
     'Plan your budget, match your taste, get a good meal at the lowest cost',
   登录: 'Sign in',
@@ -460,9 +460,9 @@ const DICT = {
   偏少: 'A bit little',
 
   // ── 导航标题 / tabBar ──
-  '寿司朗点餐测评': 'Sushiro Ordering Review',
-  寿司菜单: 'Sushi menu',
-  寿司图鉴: 'Sushi guide',
+  '一贯点餐测评': 'IKKAN Ordering Review',
+  一贯菜单: 'IKKAN menu',
+  一贯图鉴: 'IKKAN guide',
   '登录 / 注册': 'Sign in / Sign up',
   记录详情: 'Meal details',
   首页: 'Home',

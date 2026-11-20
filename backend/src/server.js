@@ -170,7 +170,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[寿司朗后端] 已启动: http://127.0.0.1:${PORT}`);
+  console.log(`[一贯 IKKAN 后端] 已启动: http://127.0.0.1:${PORT}`);
   console.log(`[数据库] ${DB_PATH}`);
   console.log(seedResult.skipped ? '[种子数据] 已存在，跳过' : '[种子数据] 已初始化（admin/admin123, demo/demo123）');
 });

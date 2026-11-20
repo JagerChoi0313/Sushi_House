@@ -1,9 +1,9 @@
 {
   "pages": [
-    { "path": "pages/index/index", "style": { "navigationBarTitleText": "寿司朗点餐测评" } },
+    { "path": "pages/index/index", "style": { "navigationBarTitleText": "一贯点餐测评" } },
     { "path": "pages/menu/menu", "style": { "navigationBarTitleText": "寿司菜单" } },
     { "path": "pages/world/world", "style": { "navigationBarTitleText": "七地区世界菜单" } },
-    { "path": "pages/encyclopedia/encyclopedia", "style": { "navigationBarTitleText": "寿司图鉴" } },
+    { "path": "pages/encyclopedia/encyclopedia", "style": { "navigationBarTitleText": "一贯图鉴" } },
     { "path": "pages/profile/profile", "style": { "navigationBarTitleText": "我的" } },
     { "path": "pages/login/login", "style": { "navigationBarTitleText": "登录 / 注册" } },
     { "path": "pages/plan/plan", "style": { "navigationBarTitleText": "餐前推荐" } },
@@ -18,16 +18,16 @@
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
-      { "pagePath": "pages/index/index", "text": "首页" },
-      { "pagePath": "pages/menu/menu", "text": "菜单" },
-      { "pagePath": "pages/world/world", "text": "世界" },
-      { "pagePath": "pages/encyclopedia/encyclopedia", "text": "图鉴" },
-      { "pagePath": "pages/profile/profile", "text": "我的" }
+      { "pagePath": "pages/index/index", "text": "首页", "iconPath": "static/tabbar/tab-index.png", "selectedIconPath": "static/tabbar/tab-index-on.png" },
+      { "pagePath": "pages/menu/menu", "text": "菜单", "iconPath": "static/tabbar/tab-menu.png", "selectedIconPath": "static/tabbar/tab-menu-on.png" },
+      { "pagePath": "pages/world/world", "text": "世界", "iconPath": "static/tabbar/tab-world.png", "selectedIconPath": "static/tabbar/tab-world-on.png" },
+      { "pagePath": "pages/encyclopedia/encyclopedia", "text": "图鉴", "iconPath": "static/tabbar/tab-encyclopedia.png", "selectedIconPath": "static/tabbar/tab-encyclopedia-on.png" },
+      { "pagePath": "pages/profile/profile", "text": "我的", "iconPath": "static/tabbar/tab-profile.png", "selectedIconPath": "static/tabbar/tab-profile-on.png" }
     ]
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "寿司朗点餐测评",
+    "navigationBarTitleText": "一贯点餐测评",
     "navigationBarBackgroundColor": "#ffffff",
     "backgroundColor": "#f5f6f8"
   }
